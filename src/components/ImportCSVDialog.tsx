@@ -26,7 +26,7 @@ import { SchemaDefinition } from '@/types/schema';
 import { parseCSV, readFileAsText, readExcelFile } from '@/lib/csv-parser';
 import { detectSchemaForRows } from '@/lib/csv-parser';
 import { getAllSchemas } from '@/services/schema-manager';
-import { mapRow } from '@/services/schema-mapper';
+import { SchemaMapper } from '@/services/schema-mapper';
 import { toast } from 'sonner';
 
 interface ImportCSVDialogProps {
@@ -97,15 +97,18 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
       setParsedRows(rows);
 
       // Detect best matching schema
-      const result = detectSchemaForRows(rows, availableSchemas);
-      
-      if (result.schema) {
-        setDetectedSchema(result.schema);
-        setSelectedSchema(result.schema);
-        setMatchScore(result.matchScore);
+      const schema = detectSchemaForRows(rows, availableSchemas);
+
+      if (schema) {
+        // Calculate match score separately
+        const score = SchemaMapper.calculateMatchScore(rows[0], schema) / 100; // Convert to 0-1 range
         
+        setDetectedSchema(schema);
+        setSelectedSchema(schema);
+        setMatchScore(score);
+
         toast.success(
-          `Schema detected: ${result.schema.name} (${Math.round(result.matchScore * 100)}% match)`,
+          `Schema detected: ${schema.name} (${Math.round(score * 100)}% match)`,
           { duration: 4000 }
         );
       } else {
@@ -170,12 +173,13 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
 
       // Convert rows to CallRecords using selected schema
       const callRecords: CallRecord[] = rows.map((row, index) => {
-        const metadata = mapRow(row, selectedSchema);
+        const metadata = SchemaMapper.mapRow(row, selectedSchema);
         
         return {
           id: `import-${Date.now()}-${index}`,
           status: 'uploaded' as const,
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
           schemaId: selectedSchema.id,
           schemaVersion: selectedSchema.version,
           metadata,
@@ -231,14 +235,6 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <Alert>
-            <Warning size={18} />
-            <AlertDescription>
-              Make sure your CSV file has the correct column headers: TITLE, BILLID, ORDERID, User_id, File_tag,
-              Agent name, Product, Customer type, Borrower name, Nationality, Days past due, Due amount, Follow up status.
-            </AlertDescription>
-          </Alert>
-
           <div className="space-y-2">
             <Label htmlFor="csv-file">Excel or CSV File</Label>
             <div className="flex items-center gap-2">
@@ -248,6 +244,7 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
                 accept=".csv,.xlsx,.xls"
                 onChange={handleFileChange}
                 className="cursor-pointer"
+                disabled={isDetecting}
               />
               {csvFile && (
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
@@ -255,7 +252,70 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
                 </span>
               )}
             </div>
+            {isDetecting && (
+              <div className="flex items-center gap-2">
+                <Progress value={undefined} className="h-1" />
+                <span className="text-xs text-muted-foreground">Detecting schema...</span>
+              </div>
+            )}
           </div>
+
+          {/* Schema Detection Results */}
+          {detectedSchema && matchScore !== null && (
+            <Alert className={matchScore >= 0.8 ? 'border-green-500 bg-green-50 dark:bg-green-950' : 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950'}>
+              <CheckCircle size={18} className={matchScore >= 0.8 ? 'text-green-600' : 'text-yellow-600'} />
+              <AlertDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-semibold">{detectedSchema.name}</span> detected
+                  </div>
+                  <Badge variant={matchScore >= 0.8 ? 'default' : 'secondary'}>
+                    {Math.round(matchScore * 100)}% match
+                  </Badge>
+                </div>
+                <p className="text-xs mt-1 text-muted-foreground">
+                  {matchScore >= 0.8 
+                    ? 'Schema columns match well with your file structure.'
+                    : 'Schema partially matches. You may want to select a different schema or create a new one.'}
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Manual Schema Selection */}
+          {csvFile && availableSchemas.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="schema-select">Schema</Label>
+              <Select
+                value={selectedSchema?.id || ''}
+                onValueChange={(schemaId) => {
+                  const schema = availableSchemas.find(s => s.id === schemaId);
+                  setSelectedSchema(schema || null);
+                }}
+              >
+                <SelectTrigger id="schema-select">
+                  <SelectValue placeholder="Select schema..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableSchemas.map((schema) => (
+                    <SelectItem key={schema.id} value={schema.id}>
+                      <div className="flex items-center justify-between w-full">
+                        <span>{schema.name}</span>
+                        {schema.id === detectedSchema?.id && (
+                          <Badge variant="outline" className="ml-2 text-xs">Auto-detected</Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {detectedSchema 
+                  ? 'Auto-detected schema shown above. You can manually override if needed.'
+                  : 'Select the schema that matches your file structure.'}
+              </p>
+            </div>
+          )}
 
           {csvFile && (csvFile.name.endsWith('.xlsx') || csvFile.name.endsWith('.xls')) && (
             <div className="space-y-2">
