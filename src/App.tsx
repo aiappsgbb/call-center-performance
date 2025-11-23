@@ -6,13 +6,19 @@ import { AnalyticsView } from '@/components/views/AnalyticsView';
 import { AgentsView } from '@/components/views/AgentsView';
 import { ConfigDialog } from '@/components/ConfigDialog';
 import { RulesEditorDialog } from '@/components/RulesEditorDialog';
+import { SchemaSelector } from '@/components/SchemaSelector';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { setCustomEvaluationCriteria, azureOpenAIService } from '@/services/azure-openai';
-import { EvaluationCriterion } from '@/types/call';
+import { EvaluationCriterion, CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { transcriptionService } from '@/services/transcription';
 import { loadAzureConfigFromCookie } from '@/lib/azure-config-storage';
 import { AzureServicesConfig } from '@/types/config';
 import { DEFAULT_CALL_CENTER_LANGUAGES, normalizeLocaleList } from '@/lib/speech-languages';
+import { runMigration } from '@/services/schema-compatibility';
+import { getActiveSchema, setActiveSchema as setActiveSchemaInStorage, getAllSchemas } from '@/services/schema-manager';
+import { loadRulesForSchema } from '@/services/rules-generator';
+import { useToast } from '@/hooks/use-toast';
 
 const arraysEqual = (a?: string[], b?: string[]) => {
   if (a === b) return true;
@@ -22,11 +28,81 @@ const arraysEqual = (a?: string[], b?: string[]) => {
 };
 
 function App() {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('calls');
   const [customRules] = useLocalStorage<EvaluationCriterion[]>('evaluation-criteria-custom', []);
   const [azureConfig, setAzureConfig] = useLocalStorage<AzureServicesConfig | null>('azure-services-config', null);
+  const [calls] = useLocalStorage<CallRecord[]>('calls', []);
+  // Schema state
+  const [activeSchema, setActiveSchema] = useState<SchemaDefinition | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(true);
   // Batch progress state (persists across tab changes)
   const [batchProgress, setBatchProgress] = useState<{ completed: number; total: number } | null>(null);
+
+  // Initialize schema system on mount
+  useEffect(() => {
+    const initializeSchemas = async () => {
+      try {
+        console.log('🔧 Initializing schema system...');
+        
+        // Run auto-migration for existing calls
+        const migrationResult = await runMigration();
+        
+        if (migrationResult.migrated > 0) {
+          console.log(`✅ Auto-migration complete: ${migrationResult.migrated} calls migrated`);
+          toast({
+            title: 'Schema Migration Complete',
+            description: `Successfully migrated ${migrationResult.migrated} existing call(s) to new schema system.`,
+          });
+        }
+        
+        // Load active schema
+        const schema = getActiveSchema();
+        if (schema) {
+          console.log(`📋 Loaded active schema: ${schema.name} v${schema.version}`);
+          setActiveSchema(schema);
+          
+          // Load schema-specific evaluation rules
+          const schemaRules = loadRulesForSchema(schema.id);
+          if (schemaRules && schemaRules.length > 0) {
+            console.log(`📋 Loaded ${schemaRules.length} schema-specific rules for ${schema.name}`);
+            // Convert to EvaluationCriterion format and set
+            const criteriaRules: EvaluationCriterion[] = schemaRules.map(rule => ({
+              id: rule.id,
+              type: rule.type,
+              name: rule.name,
+              definition: rule.definition,
+              evaluationCriteria: rule.evaluationCriteria,
+              scoringStandard: rule.scoringStandard,
+              examples: rule.examples
+            }));
+            setCustomEvaluationCriteria(criteriaRules);
+          }
+        } else {
+          console.log('⚠️ No active schema found');
+          // Check if any schemas exist
+          const allSchemas = getAllSchemas();
+          if (allSchemas.length > 0) {
+            // Set first schema as active
+            setActiveSchemaInStorage(allSchemas[0].id);
+            setActiveSchema(allSchemas[0]);
+            console.log(`📋 Set ${allSchemas[0].name} as active schema`);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Schema initialization error:', error);
+        toast({
+          title: 'Schema Initialization Error',
+          description: 'Failed to initialize schema system. Some features may not work correctly.',
+          variant: 'destructive',
+        });
+      } finally {
+        setSchemaLoading(false);
+      }
+    };
+    
+    initializeSchemas();
+  }, []); // Run once on mount
 
   useEffect(() => {
     if (!azureConfig) {
@@ -110,12 +186,39 @@ function App() {
     setCustomEvaluationCriteria(updatedRules);
   };
 
+  // Callback when schema is changed via SchemaSelector
+  const handleSchemaChange = (schema: SchemaDefinition) => {
+    setActiveSchema(schema);
+    console.log(`📋 Schema switched to: ${schema.name} v${schema.version}`);
+    
+    // Load schema-specific rules
+    const schemaRules = loadRulesForSchema(schema.id);
+    if (schemaRules && schemaRules.length > 0) {
+      const criteriaRules: EvaluationCriterion[] = schemaRules.map(rule => ({
+        id: rule.id,
+        type: rule.type,
+        name: rule.name,
+        definition: rule.definition,
+        evaluationCriteria: rule.evaluationCriteria,
+        scoringStandard: rule.scoringStandard,
+        examples: rule.examples
+      }));
+      setCustomEvaluationCriteria(criteriaRules);
+      console.log(`📋 Loaded ${schemaRules.length} rules for ${schema.name}`);
+    }
+    
+    toast({
+      title: 'Schema Changed',
+      description: `Now using ${schema.name} v${schema.version}`,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
               <h1 className="text-3xl font-bold tracking-tight text-foreground">
                 Call Center QA Platform
               </h1>
@@ -123,7 +226,12 @@ function App() {
                 AI-powered call quality evaluation and analytics
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <SchemaSelector
+                activeSchema={activeSchema}
+                onSchemaChange={handleSchemaChange}
+              />
+              <div className="h-6 w-px bg-border" />
               <RulesEditorDialog onRulesUpdate={handleRulesUpdate} />
               <ConfigDialog />
             </div>
@@ -153,15 +261,23 @@ function App() {
               <CallsView 
                 batchProgress={batchProgress}
                 setBatchProgress={setBatchProgress}
+                activeSchema={activeSchema}
+                schemaLoading={schemaLoading}
               />
             </TabsContent>
 
             <TabsContent value="analytics">
-              <AnalyticsView />
+              <AnalyticsView 
+                activeSchema={activeSchema}
+                schemaLoading={schemaLoading}
+              />
             </TabsContent>
 
             <TabsContent value="agents">
-              <AgentsView />
+              <AgentsView 
+                activeSchema={activeSchema}
+                schemaLoading={schemaLoading}
+              />
             </TabsContent>
           </div>
         </Tabs>

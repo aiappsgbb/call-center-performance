@@ -1,13 +1,19 @@
 import { useState } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { calculateAgentPerformance } from '@/lib/analytics';
 import { Badge } from '@/components/ui/badge';
 import { TrendUp, TrendDown, Minus } from '@phosphor-icons/react';
 import { AgentDetailDialog } from '@/components/AgentDetailDialog';
 
-export function AgentsView() {
+interface AgentsViewProps {
+  activeSchema: SchemaDefinition | null;
+  schemaLoading: boolean;
+}
+
+export function AgentsView({ activeSchema, schemaLoading }: AgentsViewProps) {
   const [calls] = useLocalStorage<CallRecord[]>('calls', []);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
 

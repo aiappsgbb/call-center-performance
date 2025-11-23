@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -35,7 +36,12 @@ import { regenerateInsights } from '@/services/azure-openai';
 import { Sparkles, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-export function AnalyticsView() {
+interface AnalyticsViewProps {
+  activeSchema: SchemaDefinition | null;
+  schemaLoading: boolean;
+}
+
+export function AnalyticsView({ activeSchema, schemaLoading }: AnalyticsViewProps) {
   const [calls, setCalls] = useLocalStorage<CallRecord[]>('calls', []);
   const [regenerationMode, setRegenerationMode] = useState<'missing' | 'all'>('missing');
   const [isRegenerating, setIsRegenerating] = useState(false);

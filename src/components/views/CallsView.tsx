@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { defaultCalls } from '@/lib/default-calls';
 import { CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, MagnifyingGlass, ArrowCounterClockwise, Microphone, FileCsv } from '@phosphor-icons/react';
@@ -19,9 +20,11 @@ import { toast } from 'sonner';
 interface CallsViewProps {
   batchProgress: { completed: number; total: number } | null;
   setBatchProgress: (progress: { completed: number; total: number } | null) => void;
+  activeSchema: SchemaDefinition | null;
+  schemaLoading: boolean;
 }
 
-export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
+export function CallsView({ batchProgress, setBatchProgress, activeSchema, schemaLoading }: CallsViewProps) {
   const [calls, setCalls] = useLocalStorage<CallRecord[]>('calls', defaultCalls);
   const [callsRestored, setCallsRestored] = useState(false);
   
