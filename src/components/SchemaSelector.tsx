@@ -76,62 +76,50 @@ export function SchemaSelector({
     );
   }
 
-  if (schemas.length === 0) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">No schemas available</span>
-        {onCreateSchema && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={onCreateSchema}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Create Schema
-          </Button>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div className="flex items-center gap-2">
-      <Select
-        value={activeSchema?.id || ''}
-        onValueChange={handleSchemaChange}
-      >
-        <SelectTrigger className="w-[280px]">
-          <SelectValue placeholder="Select schema...">
-            {activeSchema && (
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{activeSchema.name}</span>
-                <Badge variant="secondary" className="text-xs">
-                  v{activeSchema.version}
-                </Badge>
-              </div>
-            )}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {schemas.map((schema) => (
-            <SelectItem key={schema.id} value={schema.id}>
-              <div className="flex items-center justify-between w-full gap-3">
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-medium">{schema.name}</span>
-                  {schema.businessContext && (
-                    <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                      {schema.businessContext}
-                    </span>
-                  )}
+      {schemas.length === 0 ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground font-medium">No schemas available</span>
+        </div>
+      ) : (
+        <Select
+          value={activeSchema?.id || ''}
+          onValueChange={handleSchemaChange}
+        >
+          <SelectTrigger className="w-[280px]">
+            <SelectValue placeholder="Select schema...">
+              {activeSchema && (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{activeSchema.name}</span>
+                  <Badge variant="secondary" className="text-xs">
+                    v{activeSchema.version}
+                  </Badge>
                 </div>
-                <Badge variant="outline" className="text-xs ml-auto">
-                  v{schema.version}
-                </Badge>
-              </div>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+              )}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {schemas.map((schema) => (
+              <SelectItem key={schema.id} value={schema.id}>
+                <div className="flex items-center justify-between w-full gap-3">
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium">{schema.name}</span>
+                    {schema.businessContext && (
+                      <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                        {schema.businessContext}
+                      </span>
+                    )}
+                  </div>
+                  <Badge variant="outline" className="text-xs ml-auto">
+                    v{schema.version}
+                  </Badge>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
 
       <Button
         variant="outline"

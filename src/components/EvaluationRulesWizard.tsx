@@ -20,15 +20,21 @@ import { SchemaDefinition } from '@/types/schema';
 import { EvaluationCriterion } from '@/types/call';
 import { LLMCaller } from '@/llmCaller';
 import type { AzureOpenAIConfig } from '@/configManager';
+import { loadAzureConfigFromCookie } from '@/lib/azure-config-storage';
 
 /**
  * Simple ConfigManager adapter for browser environment
+ * Forces API key authentication (no Entra ID support in browser)
  */
 class BrowserConfigManager {
   constructor(private config: AzureOpenAIConfig) {}
 
   async getConfig(): Promise<AzureOpenAIConfig | null> {
-    return this.config;
+    // Force authType to 'apiKey' to prevent Entra ID attempts
+    return {
+      ...this.config,
+      authType: 'apiKey'
+    };
   }
 
   async getEntraIdToken(_tenantId?: string): Promise<string | null> {
@@ -77,8 +83,20 @@ export function EvaluationRulesWizard({
   const [generating, setGenerating] = useState(false);
   const [generatedRules, setGeneratedRules] = useState<GeneratedRule[]>([]);
   const [progress, setProgress] = useState(0);
+  const [generatingDescriptions, setGeneratingDescriptions] = useState(false);
 
   const handleOpenChange = (newOpen: boolean) => {
+    if (newOpen && activeSchema) {
+      // Populate from active schema when opening
+      setBusinessContext(activeSchema.businessContext || '');
+      
+      // Get participant labels from schema fields
+      const p1Field = activeSchema.fields.find(f => f.semanticRole === 'participant_1');
+      const p2Field = activeSchema.fields.find(f => f.semanticRole === 'participant_2');
+      setParticipant1Label(p1Field?.participantLabel || p1Field?.displayName || 'Agent');
+      setParticipant2Label(p2Field?.participantLabel || p2Field?.displayName || 'Customer');
+    }
+    
     if (!newOpen) {
       // Reset wizard state when closing
       setStep('context');
@@ -90,6 +108,66 @@ export function EvaluationRulesWizard({
       setProgress(0);
     }
     setOpen(newOpen);
+  };
+
+  const handleGenerateCallDescriptions = async () => {
+    if (!activeSchema) {
+      toast.error('No active schema selected');
+      return;
+    }
+
+    if (!businessContext.trim()) {
+      toast.error('Please provide business context first');
+      return;
+    }
+
+    setGeneratingDescriptions(true);
+
+    try {
+      // Load Azure OpenAI config from cookie
+      const azureServicesConfig = loadAzureConfigFromCookie();
+      if (!azureServicesConfig?.openAI?.endpoint || !azureServicesConfig?.openAI?.apiKey || !azureServicesConfig?.openAI?.deploymentName) {
+        throw new Error('Azure OpenAI is not configured. Please configure it in settings.');
+      }
+
+      const configManager = new BrowserConfigManager(azureServicesConfig.openAI);
+      const llmCaller = new LLMCaller(configManager);
+
+      // Create prompt for call description generation
+      const schemaFieldsSummary = activeSchema.fields
+        .filter(f => f.showInTable || f.useInPrompt)
+        .map(f => `- ${f.displayName} (${f.semanticRole}): ${f.type}`)
+        .join('\n');
+
+      const prompt = `Based on this business context and schema, generate 2-3 realistic sample call descriptions that represent typical interactions.
+
+Business Context:
+${businessContext}
+
+Participants:
+- ${participant1Label}: ${activeSchema.fields.find(f => f.semanticRole === 'participant_1')?.displayName || 'First participant'}
+- ${participant2Label}: ${activeSchema.fields.find(f => f.semanticRole === 'participant_2')?.displayName || 'Second participant'}
+
+Schema Fields:
+${schemaFieldsSummary}
+
+Provide 2-3 short call descriptions (2-3 sentences each) showing different scenarios. Format as a continuous paragraph separated by new lines.`;
+
+      const response = await llmCaller.call([
+        { role: 'system', content: 'You are a call center operations expert.' },
+        { role: 'user', content: prompt }
+      ]);
+
+      if (response) {
+        setSampleCallDescriptions(response.trim());
+        toast.success('Call descriptions generated');
+      }
+    } catch (error: any) {
+      console.error('Failed to generate descriptions:', error);
+      toast.error(`Failed: ${error.message}`);
+    } finally {
+      setGeneratingDescriptions(false);
+    }
   };
 
   const handleGenerateRules = async () => {
@@ -108,20 +186,7 @@ export function EvaluationRulesWizard({
     setProgress(10);
 
     try {
-      // Read prompt template
-      const promptTemplateResponse = await fetch('/src/prompts/rules-generation.prompt.md');
-      if (!promptTemplateResponse.ok) {
-        throw new Error('Failed to load prompt template');
-      }
-      const promptTemplate = await promptTemplateResponse.text();
       setProgress(30);
-
-      // Extract prompt content (remove front matter)
-      const promptMatch = promptTemplate.match(/````prompt\n([\s\S]*?)````/);
-      if (!promptMatch) {
-        throw new Error('Invalid prompt template format');
-      }
-      const prompt = promptMatch[1];
 
       // Get participant field names from schema by semantic role
       const participant1Field = activeSchema.fields.find(
@@ -133,27 +198,67 @@ export function EvaluationRulesWizard({
       const participant1FieldName = participant1Field?.name || 'agentName';
       const participant2FieldName = participant2Field?.name || 'borrowerName';
 
-      // Fill template variables
-      const filledPrompt = prompt
-        .replace('{{businessContext}}', businessContext)
-        .replace('{{schemaJson}}', JSON.stringify(activeSchema, null, 2))
-        .replace(/\{\{participant1Label\}\}/g, participant1Label)
-        .replace(/\{\{participant2Label\}\}/g, participant2Label)
-        .replace('{{participant1FieldName}}', participant1FieldName)
-        .replace('{{participant2FieldName}}', participant2FieldName)
-        .replace('{{sampleCallDescriptions}}', sampleCallDescriptions || 'No sample descriptions provided');
+      // Build inline prompt
+      const filledPrompt = `You are an expert QA framework designer specializing in call quality evaluation. Generate comprehensive evaluation rules tailored to the provided schema and business context.
+
+## Business Context
+${businessContext}
+
+## Schema Definition
+${JSON.stringify(activeSchema, null, 2)}
+
+## Participant Information
+- **Participant 1 (${participant1Label})**: ${participant1FieldName}
+- **Participant 2 (${participant2Label})**: ${participant2FieldName}
+
+## Sample Call Descriptions
+${sampleCallDescriptions || 'No sample descriptions provided'}
+
+## Your Task
+Generate 8-12 **evaluation rules** that assess conversation quality. Each rule should:
+
+1. **Be domain-appropriate**: Match the business context and industry
+2. **Be measurable**: Have clear pass/fail/partial criteria
+3. **Reference schema fields**: Use participant labels and classification fields
+4. **Provide actionable feedback**: Help improve performance
+5. **Cover key aspects**: Opening, process, compliance, tone, closing
+
+### Rule Categories to Include:
+- **Communication Skills**: Clarity, tone, professionalism
+- **Process Compliance**: Following procedures, required disclosures
+- **Information Gathering**: Questions asked, data collected
+- **Problem Solving**: Handling objections, finding solutions
+- **Relationship Building**: Empathy, rapport, customer experience
+- **Documentation**: Accuracy, completeness of records
+
+## Response Format
+Return a valid JSON array of evaluation rule objects. Each object must have:
+- id (number): Sequential starting from 1
+- type (string): "Must Do" or "Must Not Do"
+- name (string): Rule name (3-5 words)
+- definition (string): What this rule evaluates (1-2 sentences)
+- evaluationCriteria (string): Specific criteria with bullet points
+- scoringStandard (object): { passed: number, failed: number, partial?: number }
+- examples (array): 2-3 example strings
+- reasoning (string): Why this matters for the business context
+
+**Scoring Guidelines:**
+- Critical compliance rules: 10-15 points
+- Important quality rules: 5-10 points
+- Minor improvement rules: 2-5 points
+
+**Important:** Tailor rules to the business context, use participant labels consistently, ensure rules are objective and measurable.`;
 
       setProgress(50);
 
-      // Load Azure OpenAI config from localStorage
-      const azureConfigStr = localStorage.getItem('azure-openai-config');
-      if (!azureConfigStr) {
+      // Load Azure OpenAI config from cookie
+      const azureServicesConfig = loadAzureConfigFromCookie();
+      if (!azureServicesConfig?.openAI?.endpoint || !azureServicesConfig?.openAI?.apiKey || !azureServicesConfig?.openAI?.deploymentName) {
         throw new Error('Azure OpenAI is not configured. Please configure it in settings.');
       }
-      const azureConfig: AzureOpenAIConfig = JSON.parse(azureConfigStr);
 
       // Call LLM
-      const configManager = new BrowserConfigManager(azureConfig);
+      const configManager = new BrowserConfigManager(azureServicesConfig.openAI);
       const llmCaller = new LLMCaller(configManager);
 
       console.log('🤖 Generating evaluation rules with AI...');
@@ -219,9 +324,21 @@ export function EvaluationRulesWizard({
       return;
     }
 
-    // Convert to EvaluationCriterion format
-    const criteriaRules: EvaluationCriterion[] = generatedRules.map((rule) => ({
-      id: rule.id,
+    // Load existing rules
+    const storageKey = `evaluation-criteria-${activeSchema.id}`;
+    const existingRulesStr = localStorage.getItem(storageKey);
+    const existingRules: EvaluationCriterion[] = existingRulesStr 
+      ? JSON.parse(existingRulesStr) 
+      : [];
+
+    // Find the highest existing ID
+    const maxId = existingRules.length > 0 
+      ? Math.max(...existingRules.map(r => r.id)) 
+      : 0;
+
+    // Convert generated rules to EvaluationCriterion format with new IDs
+    const newRules: EvaluationCriterion[] = generatedRules.map((rule, index) => ({
+      id: maxId + index + 1,
       type: rule.type,
       name: rule.name,
       definition: rule.definition,
@@ -230,18 +347,20 @@ export function EvaluationRulesWizard({
       examples: rule.examples,
     }));
 
-    // Save to schema-specific localStorage
-    const storageKey = `evaluation-criteria-${activeSchema.id}`;
-    localStorage.setItem(storageKey, JSON.stringify(criteriaRules));
+    // Merge existing and new rules
+    const mergedRules = [...existingRules, ...newRules];
 
-    // Also update global custom rules
-    localStorage.setItem('evaluation-criteria-custom', JSON.stringify(criteriaRules));
+    // Save merged rules to schema-specific localStorage
+    localStorage.setItem(storageKey, JSON.stringify(mergedRules));
 
-    // Notify parent
-    onRulesGenerated?.(criteriaRules);
+    // Also update global custom rules with merged rules
+    localStorage.setItem('evaluation-criteria-custom', JSON.stringify(mergedRules));
+
+    // Notify parent with merged rules
+    onRulesGenerated?.(mergedRules);
 
     setStep('complete');
-    toast.success(`Saved ${criteriaRules.length} rules to ${activeSchema.name}`);
+    toast.success(`Added ${newRules.length} new rules to ${activeSchema.name} (Total: ${mergedRules.length})`);
 
     // Close after brief delay
     setTimeout(() => {
@@ -332,9 +451,12 @@ export function EvaluationRulesWizard({
                       onChange={(e) => setBusinessContext(e.target.value)}
                       placeholder="Describe your business domain, industry, and call center operations. E.g., 'Debt collection call center for a digital lending platform in UAE. Agents contact borrowers with overdue payments to recover outstanding amounts while maintaining professionalism and compliance.'"
                       rows={4}
+                      disabled={!!activeSchema?.businessContext}
                     />
                     <p className="text-xs text-muted-foreground">
-                      This helps the AI generate domain-specific evaluation criteria
+                      {activeSchema?.businessContext 
+                        ? '✓ Loaded from active schema' 
+                        : 'This helps the AI generate domain-specific evaluation criteria'}
                     </p>
                   </div>
 
@@ -346,11 +468,12 @@ export function EvaluationRulesWizard({
                         value={participant1Label}
                         onChange={(e) => setParticipant1Label(e.target.value)}
                         placeholder="Agent"
+                        disabled
                       />
                       <p className="text-xs text-muted-foreground">
                         Field:{' '}
                         {activeSchema.fields.find((f) => f.semanticRole === 'participant_1')
-                          ?.displayName || 'Agent Name'}
+                          ?.displayName || 'Agent name'}
                       </p>
                     </div>
                     <div className="space-y-2">
@@ -360,17 +483,31 @@ export function EvaluationRulesWizard({
                         value={participant2Label}
                         onChange={(e) => setParticipant2Label(e.target.value)}
                         placeholder="Customer"
+                        disabled
                       />
                       <p className="text-xs text-muted-foreground">
                         Field:{' '}
                         {activeSchema.fields.find((f) => f.semanticRole === 'participant_2')
-                          ?.displayName || 'Borrower Name'}
+                          ?.displayName || 'Borrower name'}
                       </p>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="sample-calls">Sample Call Descriptions (Optional)</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="sample-calls">Sample Call Descriptions (Optional)</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-purple-500 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                        onClick={handleGenerateCallDescriptions}
+                        disabled={!businessContext.trim() || generatingDescriptions}
+                      >
+                        <Sparkle className="mr-2" size={16} />
+                        {generatingDescriptions ? 'Generating...' : 'Generate Call Descriptions'}
+                      </Button>
+                    </div>
                     <Textarea
                       id="sample-calls"
                       value={sampleCallDescriptions}

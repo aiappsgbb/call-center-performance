@@ -231,7 +231,8 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
             });
           }
         },
-        5 // Process 5 calls at a time
+        5, // Process 5 calls at a time
+        activeSchema // Pass schema for sentiment analysis and evaluation
       );
 
       // Update all calls with their results
@@ -290,11 +291,17 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
 
   const filteredCalls = (calls || []).filter((call) => {
     const query = searchQuery.toLowerCase();
-    return (
-      call.metadata.agentName.toLowerCase().includes(query) ||
-      call.metadata.borrowerName.toLowerCase().includes(query) ||
-      call.metadata.product.toLowerCase().includes(query)
-    );
+    
+    // Search across all metadata fields that are strings
+    return Object.values(call.metadata || {}).some(value => {
+      if (typeof value === 'string') {
+        return value.toLowerCase().includes(query);
+      }
+      if (typeof value === 'number') {
+        return value.toString().includes(query);
+      }
+      return false;
+    });
   });
 
   const handleReset = () => {

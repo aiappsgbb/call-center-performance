@@ -220,6 +220,8 @@ export function CallsTable({
         <TableBody>
           {sortedCalls.map((call) => {
             const canTranscribe = !!call.audioFile;
+            const canEvaluate = !!call.transcript;
+            const canProcess = canTranscribe || canEvaluate;
             
             return (
             <TableRow
@@ -228,7 +230,7 @@ export function CallsTable({
               onClick={() => onSelectCall(call)}
             >
               <TableCell className="w-12" onClick={(e) => e.stopPropagation()}>
-                {canTranscribe && (
+                {canProcess && (
                   <Checkbox
                     checked={selectedCallIds.has(call.id)}
                     onCheckedChange={() => onToggleSelect(call.id)}

@@ -36,7 +36,7 @@ import {
   Sparkle,
 } from '@phosphor-icons/react';
 import { SchemaDefinition, FieldDefinition, SemanticRole, FieldType } from '@/types/schema';
-import { readExcelFile, parseCSV, readFileAsText, extractColumnNames } from '@/lib/csv-parser';
+import { readExcelFile, parseCSV, readFileAsText, extractColumnNames, getExcelSheetNames } from '@/lib/csv-parser';
 import {
   discoverSchemaFromExcel,
   calculateDataStatistics,
@@ -47,6 +47,33 @@ import {
 import { SchemaMapper } from '@/services/schema-mapper';
 import { createSchema } from '@/services/schema-manager';
 import { toast } from 'sonner';
+import { LLMCaller } from '@/llmCaller';
+import type { AzureOpenAIConfig } from '@/configManager';
+import { loadAzureConfigFromCookie } from '@/lib/azure-config-storage';
+
+/**
+ * Simple ConfigManager adapter for browser environment
+ * Forces API Key authentication (no Entra ID support)
+ */
+class BrowserConfigManager {
+  constructor(private config: AzureOpenAIConfig) {}
+
+  async getConfig(): Promise<AzureOpenAIConfig | null> {
+    // Ensure authType is set to apiKey for browser environment
+    return {
+      ...this.config,
+      authType: 'apiKey'
+    };
+  }
+
+  async getEntraIdToken(_tenantId?: string): Promise<string | null> {
+    throw new Error('Entra ID authentication not supported in browser environment');
+  }
+
+  getMaxRetries(): number {
+    return 3;
+  }
+}
 
 interface SchemaDiscoveryWizardProps {
   open: boolean;
@@ -91,6 +118,7 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
 
   // Upload step
   const [file, setFile] = useState<File | null>(null);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
   const [sheetName, setSheetName] = useState('Sheet1');
   const [businessContext, setBusinessContext] = useState('');
   const [parsedRows, setParsedRows] = useState<Record<string, any>[] | null>(null);
@@ -104,6 +132,8 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
   const [schemaName, setSchemaName] = useState('');
   const [participant1Label, setParticipant1Label] = useState('');
   const [participant2Label, setParticipant2Label] = useState('');
+  const [participant1Field, setParticipant1Field] = useState<string>(''); // Field ID for participant 1
+  const [participant2Field, setParticipant2Field] = useState<string>(''); // Field ID for participant 2
   const [editableFields, setEditableFields] = useState<DiscoveredField[]>([]);
   const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null);
 
@@ -132,7 +162,15 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       let rows: any[];
 
       if (isExcel) {
-        rows = await readExcelFile(selectedFile, sheetName);
+        // Get available sheet names
+        const sheets = await getExcelSheetNames(selectedFile);
+        setAvailableSheets(sheets);
+        
+        // Use first sheet if current sheetName doesn't exist
+        const targetSheet = sheets.includes(sheetName) ? sheetName : sheets[0];
+        setSheetName(targetSheet);
+        
+        rows = await readExcelFile(selectedFile, targetSheet);
       } else {
         const csvText = await readFileAsText(selectedFile);
         rows = parseCSV(csvText);
@@ -324,8 +362,8 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       if (!isOpen) resetWizard();
       onOpenChange(isOpen);
     }}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-6xl h-[90vh] overflow-hidden flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Sparkle size={24} weight="duotone" className="text-blue-500" />
             {getStepTitle()}
@@ -336,7 +374,7 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
           <Progress value={getStepProgress()} className="mt-4" />
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-4">
+        <ScrollArea className="flex-1 pr-4 min-h-0">
           {/* Step 1: Upload */}
           {currentStep === 'upload' && (
             <div className="space-y-6 py-4">
@@ -368,15 +406,43 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
                     )}
                   </div>
 
-                  {file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) && (
+                  {file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) && availableSheets.length > 0 && (
                     <div className="space-y-2">
                       <Label htmlFor="sheet-name">Sheet Name</Label>
-                      <Input
-                        id="sheet-name"
+                      <Select
                         value={sheetName}
-                        onChange={(e) => setSheetName(e.target.value)}
-                        placeholder="Sheet1"
-                      />
+                        onValueChange={async (value) => {
+                          setSheetName(value);
+                          // Reload data from selected sheet
+                          if (file) {
+                            setIsProcessing(true);
+                            try {
+                              const rows = await readExcelFile(file, value);
+                              const sampleRows = rows.slice(0, 20);
+                              setParsedRows(sampleRows);
+                              const cols = extractColumnNames(sampleRows);
+                              setColumns(cols);
+                              toast.success(`Loaded sheet: ${value}`);
+                            } catch (error) {
+                              console.error('Sheet reload error:', error);
+                              toast.error('Failed to load sheet');
+                            } finally {
+                              setIsProcessing(false);
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger id="sheet-name">
+                          <SelectValue placeholder="Select sheet..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableSheets.map((sheet) => (
+                            <SelectItem key={sheet} value={sheet}>
+                              {sheet}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
 
@@ -400,13 +466,65 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
                     Describe the purpose and domain of this data to help the AI make better inferences
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-purple-500 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                      onClick={async () => {
+                        if (!columns || columns.length === 0) {
+                          toast.error('No column data available');
+                          return;
+                        }
+                        setIsProcessing(true);
+                        try {
+                          // Load Azure OpenAI config from cookie (same as rest of app)
+                          const azureServicesConfig = loadAzureConfigFromCookie();
+                          if (!azureServicesConfig?.openAI?.endpoint || !azureServicesConfig?.openAI?.apiKey || !azureServicesConfig?.openAI?.deploymentName) {
+                            toast.error('Azure OpenAI not configured. Please configure in settings.');
+                            setIsProcessing(false);
+                            return;
+                          }
+
+                          const configManager = new BrowserConfigManager(azureServicesConfig.openAI);
+                          const llmCaller = new LLMCaller(configManager);
+
+                          const prompt = `Based on these column names from a dataset, generate a concise business context description (2-3 sentences) explaining what this data is about, what domain it belongs to, and what purpose it serves:
+
+Column names: ${columns.join(', ')}
+
+Provide only the business context description without any additional explanation or formatting.`;
+
+                          const response = await llmCaller.call([{ role: 'user', content: prompt }]);
+
+                          if (response) {
+                            setBusinessContext(response.trim());
+                            toast.success('Business context generated');
+                          }
+                        } catch (error) {
+                          console.error('Context generation error:', error);
+                          toast.error('Failed to generate context');
+                        } finally {
+                          setIsProcessing(false);
+                        }
+                      }}
+                      disabled={isProcessing || !columns || columns.length === 0}
+                    >
+                      <Sparkle className="mr-2 h-4 w-4" />
+                      Suggest Context with AI
+                    </Button>
+                    {isProcessing && (
+                      <span className="text-xs text-muted-foreground">Generating...</span>
+                    )}
+                  </div>
                   <Textarea
                     value={businessContext}
                     onChange={(e) => setBusinessContext(e.target.value)}
                     placeholder="Example: This is call center data for a debt collection agency. Agents contact borrowers about overdue payments. We track call outcomes, borrower information, and payment status."
-                    rows={5}
-                    className="resize-none"
+                    rows={6}
+                    className="resize-none max-h-40 overflow-y-auto"
                   />
                 </CardContent>
               </Card>
@@ -447,22 +565,81 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="participant-1">Participant 1 Label</Label>
+                      <Label htmlFor="participant-1-label">Participant 1 Label</Label>
                       <Input
-                        id="participant-1"
+                        id="participant-1-label"
                         value={participant1Label}
                         onChange={(e) => setParticipant1Label(e.target.value)}
                         placeholder="Agent"
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="participant-2">Participant 2 Label</Label>
+                      <Label htmlFor="participant-2-label">Participant 2 Label</Label>
                       <Input
-                        id="participant-2"
+                        id="participant-2-label"
                         value={participant2Label}
                         onChange={(e) => setParticipant2Label(e.target.value)}
                         placeholder="Customer"
                       />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="participant-1-field">Participant 1 Field (Agent Name)</Label>
+                      <Select
+                        value={participant1Field}
+                        onValueChange={setParticipant1Field}
+                      >
+                        <SelectTrigger id="participant-1-field" className="w-full">
+                          <SelectValue placeholder="Select field..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-w-[400px]">
+                          <SelectItem value="__generate__">
+                            🎲 Generate Names
+                          </SelectItem>
+                          {editableFields
+                            .filter(f => f.semanticRole === 'participant_1' || f.inferredType === 'string')
+                            .map((field) => (
+                              <SelectItem key={field.suggestedFieldId} value={field.suggestedFieldId}>
+                                <span className="truncate">{field.suggestedDisplayName}</span>
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {participant1Field === '__generate__' && (
+                        <p className="text-xs text-muted-foreground">
+                          AI will generate 5 random agent names
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="participant-2-field">Participant 2 Field (Caller Name)</Label>
+                      <Select
+                        value={participant2Field}
+                        onValueChange={setParticipant2Field}
+                      >
+                        <SelectTrigger id="participant-2-field" className="w-full">
+                          <SelectValue placeholder="Select field..." />
+                        </SelectTrigger>
+                        <SelectContent className="max-w-[400px]">
+                          <SelectItem value="__generate__">
+                            🎲 Generate Names
+                          </SelectItem>
+                          {editableFields
+                            .filter(f => f.semanticRole === 'participant_2' || f.inferredType === 'string')
+                            .map((field) => (
+                              <SelectItem key={field.suggestedFieldId} value={field.suggestedFieldId}>
+                                <span className="truncate">{field.suggestedDisplayName}</span>
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {participant2Field === '__generate__' && (
+                        <p className="text-xs text-muted-foreground">
+                          AI will generate 5 random caller names
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -478,13 +655,163 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Discovered Fields ({editableFields.length})</CardTitle>
-                  <CardDescription>
-                    Review and edit the field mappings. Click a field to edit its properties.
-                  </CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Discovered Fields ({editableFields.length})</CardTitle>
+                      <CardDescription>
+                        Review and edit the field mappings. Click a field to edit its properties.
+                      </CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-purple-500 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                      onClick={async () => {
+                        setIsProcessing(true);
+                        try {
+                          const azureServicesConfig = loadAzureConfigFromCookie();
+                          if (!azureServicesConfig?.openAI?.endpoint || !azureServicesConfig?.openAI?.apiKey || !azureServicesConfig?.openAI?.deploymentName) {
+                            toast.error('Azure OpenAI not configured');
+                            setIsProcessing(false);
+                            return;
+                          }
+
+                          const configManager = new BrowserConfigManager(azureServicesConfig.openAI);
+                          const llmCaller = new LLMCaller(configManager);
+
+                          // Prepare field list for context
+                          const fieldList = editableFields.map(f => 
+                            `- ${f.suggestedDisplayName} (${f.columnName}): current role=${f.semanticRole}, type=${f.inferredType}`
+                          ).join('\n');
+
+                          const prompt = `Given this business context and list of data fields, analyze each field and configure its properties optimally.
+
+Business Context:
+${businessContext}
+
+Fields:
+${fieldList}
+
+For each field, provide:
+1. description: 1-2 sentences explaining what it represents
+2. semanticRole: one of [participant_1, participant_2, classification, metric, dimension, identifier, timestamp, freeform]
+   - participant_1/participant_2: People involved (agent, customer)
+   - classification: Categorical status/outcome
+   - metric: Numeric measurement
+   - dimension: Grouping/analysis field
+   - identifier: Unique ID
+   - timestamp: Date/time
+   - freeform: Unstructured text
+3. inferredType: one of [string, number, date, boolean, select]
+4. required: true if field is essential
+5. showInTable: true if should display in data tables
+6. useInPrompt: true if useful for AI analysis
+7. enableAnalytics: true if suitable for charts/reports
+
+Return JSON array:
+[
+  {
+    "fieldId": "field_name",
+    "description": "...",
+    "semanticRole": "metric",
+    "inferredType": "number",
+    "required": true,
+    "showInTable": true,
+    "useInPrompt": true,
+    "enableAnalytics": true
+  }
+]`;
+
+                          interface FieldConfig {
+                            fieldId: string;
+                            description: string;
+                            semanticRole: SemanticRole;
+                            inferredType: FieldType;
+                            required: boolean;
+                            showInTable: boolean;
+                            useInPrompt: boolean;
+                            enableAnalytics: boolean;
+                          }
+
+                          const response = await llmCaller.callWithJsonValidation<FieldConfig[]>(
+                            [{ role: 'user', content: prompt }],
+                            { useJsonMode: false, maxRetries: 2 }
+                          );
+
+                          if (response.parsed && Array.isArray(response.parsed)) {
+                            console.log('Parsed field configurations:', response.parsed);
+                            console.log('Current fields:', editableFields.map(f => ({ id: f.suggestedFieldId, display: f.suggestedDisplayName, column: f.columnName })));
+                            
+                            // Validate semantic roles and field types
+                            const validSemanticRoles = new Set<SemanticRole>([
+                              'participant_1', 'participant_2', 'classification', 'metric', 
+                              'dimension', 'identifier', 'timestamp', 'freeform'
+                            ]);
+                            const validFieldTypes = new Set<FieldType>([
+                              'string', 'number', 'date', 'boolean', 'select'
+                            ]);
+                            
+                            // Update fields with ALL properties - flexible matching
+                            const updatedFields = editableFields.map(field => {
+                              const match = response.parsed.find((d: FieldConfig) => {
+                                const fieldIdLower = (d.fieldId || '').toLowerCase();
+                                const suggestedIdLower = field.suggestedFieldId.toLowerCase();
+                                const columnNameLower = field.columnName.toLowerCase();
+                                const displayNameLower = field.suggestedDisplayName.toLowerCase();
+                                
+                                // Match by exact ID, column name, display name, or if fieldId contains the column name
+                                return fieldIdLower === suggestedIdLower ||
+                                       fieldIdLower === columnNameLower ||
+                                       fieldIdLower === displayNameLower ||
+                                       fieldIdLower.includes(columnNameLower) ||
+                                       columnNameLower.includes(fieldIdLower.replace(/\s*\(.*?\)\s*/g, '').trim());
+                              });
+                              
+                              if (match) {
+                                console.log(`Matched field ${field.suggestedDisplayName} - configuring all properties`);
+                                
+                                // Validate and apply all properties
+                                const semanticRole = validSemanticRoles.has(match.semanticRole) 
+                                  ? match.semanticRole 
+                                  : field.semanticRole;
+                                const inferredType = validFieldTypes.has(match.inferredType)
+                                  ? match.inferredType
+                                  : field.inferredType;
+
+                                return {
+                                  ...field,
+                                  description: match.description,
+                                  semanticRole,
+                                  inferredType,
+                                  required: match.required,
+                                  showInTable: match.showInTable,
+                                  useInPrompt: match.useInPrompt,
+                                  enableAnalytics: match.enableAnalytics
+                                };
+                              }
+                              
+                              return field;
+                            });
+                            setEditableFields(updatedFields);
+                            toast.success('All field properties configured by AI');
+                          }
+                        } catch (error) {
+                          console.error('Description generation error:', error);
+                          toast.error('Failed to generate descriptions');
+                        } finally {
+                          setIsProcessing(false);
+                        }
+                      }}
+                      disabled={isProcessing || !businessContext.trim()}
+                    >
+                      <Sparkle className="mr-2 h-4 w-4" />
+                      Configure All Fields with AI
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2">
                     {editableFields.map((field, idx) => (
                       <div
                         key={idx}
@@ -505,17 +832,24 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
                                 </Badge>
                               </div>
                               {selectedFieldIndex !== idx && (
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Badge variant="secondary" className="text-xs">
-                                    {SEMANTIC_ROLES.find(r => r.value === field.semanticRole)?.label}
-                                  </Badge>
-                                  <Badge variant="secondary" className="text-xs">
-                                    {FIELD_TYPES.find(t => t.value === field.inferredType)?.label}
-                                  </Badge>
-                                  {field.required && (
-                                    <Badge variant="destructive" className="text-xs">Required</Badge>
+                                <>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <Badge variant="secondary" className="text-xs">
+                                      {SEMANTIC_ROLES.find(r => r.value === field.semanticRole)?.label}
+                                    </Badge>
+                                    <Badge variant="secondary" className="text-xs">
+                                      {FIELD_TYPES.find(t => t.value === field.inferredType)?.label}
+                                    </Badge>
+                                    {field.required && (
+                                      <Badge variant="destructive" className="text-xs">Required</Badge>
+                                    )}
+                                  </div>
+                                  {field.description && (
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                      {field.description}
+                                    </p>
                                   )}
-                                </div>
+                                </>
                               )}
                             </div>
                           </div>
@@ -526,7 +860,7 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
 
                         {/* Expanded Edit Form */}
                         {selectedFieldIndex === idx && (
-                          <div className="mt-4 pt-4 border-t space-y-4">
+                          <div className="mt-4 pt-4 border-t space-y-4" onClick={(e) => e.stopPropagation()}>
                             <div className="grid grid-cols-2 gap-4">
                               <div className="space-y-2">
                                 <Label>Display Name</Label>
@@ -542,6 +876,17 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
                                   onChange={(e) => updateField(idx, { suggestedFieldId: e.target.value })}
                                 />
                               </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Description (what this field represents)</Label>
+                              <Textarea
+                                value={field.description || ''}
+                                onChange={(e) => updateField(idx, { description: e.target.value })}
+                                placeholder="AI-generated description will appear here. You can edit it to provide context for later AI operations."
+                                rows={2}
+                                className="resize-none"
+                              />
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -633,7 +978,7 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
           )}
         </ScrollArea>
 
-        <DialogFooter className="border-t pt-4">
+        <DialogFooter className="flex-shrink-0 border-t pt-4 mt-4">
           {currentStep === 'upload' && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>

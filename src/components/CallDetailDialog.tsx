@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import {
   Dialog,
@@ -48,8 +48,20 @@ export function CallDetailDialog({
   
   const [transcribing, setTranscribing] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | undefined>(undefined);
 
   const isProcessing = call.status === 'processing' || transcribing;
+
+  // Create blob URL for audio file
+  useEffect(() => {
+    if (call.audioFile && call.audioFile instanceof Blob) {
+      const url = URL.createObjectURL(call.audioFile);
+      setAudioUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else if (call.metadata?.audioUrl) {
+      setAudioUrl(call.metadata.audioUrl);
+    }
+  }, [call.audioFile, call.metadata?.audioUrl]);
 
   const handleTranscribe = async () => {
     if (!call.audioFile) {
@@ -247,7 +259,7 @@ export function CallDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="!max-w-[80vw] w-[80vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -335,8 +347,14 @@ export function CallDetailDialog({
                 {call.transcriptPhrases && call.transcriptPhrases.length > 0 ? (
                   <TranscriptConversation
                     phrases={call.transcriptPhrases}
-                    agentName={call.metadata.agentName}
-                    borrowerName={call.metadata.borrowerName}
+                    agentName={(() => {
+                      const agentField = schema.fields.find(f => f.semanticRole === 'participant_1');
+                      return agentField ? String(call.metadata[agentField.fieldName] || agentField.participantLabel || 'Agent') : 'Agent';
+                    })()}
+                    borrowerName={(() => {
+                      const borrowerField = schema.fields.find(f => f.semanticRole === 'participant_2');
+                      return borrowerField ? String(call.metadata[borrowerField.fieldName] || borrowerField.participantLabel || 'Customer') : 'Customer';
+                    })()}
                     locale={call.transcriptLocale}
                     duration={call.transcriptDuration}
                   />
@@ -731,7 +749,7 @@ export function CallDetailDialog({
 
             {call.sentimentSegments && call.sentimentSegments.length > 0 && (
               <CallSentimentPlayer
-                audioUrl={call.metadata.audioUrl}
+                audioUrl={audioUrl}
                 durationMilliseconds={call.transcriptDuration}
                 segments={call.sentimentSegments}
                 sentimentSummary={call.sentimentSummary}

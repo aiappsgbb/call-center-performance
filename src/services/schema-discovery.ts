@@ -12,6 +12,7 @@ export interface DiscoveredField {
   columnName: string;
   suggestedFieldId: string;
   suggestedDisplayName: string;
+  description?: string; // User-editable explanation of what this field represents
   inferredType: 'string' | 'number' | 'date' | 'boolean' | 'select';
   semanticRole: 'participant_1' | 'participant_2' | 'classification' | 'metric' | 'dimension' | 'identifier' | 'timestamp' | 'freeform';
   required: boolean;
@@ -20,7 +21,7 @@ export interface DiscoveredField {
   enableAnalytics: boolean;
   selectOptions?: string[];
   cardinalityHint: 'low' | 'medium' | 'high';
-  reasoning: string;
+  reasoning: string; // AI-generated reasoning for field configuration
 }
 
 export interface SchemaDiscoveryResult {

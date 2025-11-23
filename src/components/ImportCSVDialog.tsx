@@ -171,9 +171,27 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
       console.log('Selected schema:', selectedSchema.name);
       console.log('Total rows:', rows.length);
 
+      // Find audio file field in schema
+      const audioUrlField = selectedSchema.fields.find(f => 
+        f.name.toLowerCase().includes('audiourl') || 
+        f.name.toLowerCase().includes('audio_url') ||
+        f.name.toLowerCase().includes('filetag') ||
+        f.name.toLowerCase().includes('file_tag') ||
+        f.name.toLowerCase().includes('file')
+      );
+
       // Convert rows to CallRecords using selected schema
       const callRecords: CallRecord[] = rows.map((row, index) => {
         const metadata = SchemaMapper.mapRow(row, selectedSchema);
+        
+        // Extract audio filename from metadata and construct full URL
+        let audioUrl: string | undefined;
+        if (audioUrlField && metadata[audioUrlField.name]) {
+          const audioFileName = metadata[audioUrlField.name];
+          // Ensure audioFolderPath ends with /
+          const basePath = audioFolderPath.endsWith('/') ? audioFolderPath : `${audioFolderPath}/`;
+          audioUrl = `${basePath}${audioFileName}`;
+        }
         
         return {
           id: `import-${Date.now()}-${index}`,
@@ -183,20 +201,17 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
           schemaId: selectedSchema.id,
           schemaVersion: selectedSchema.version,
           metadata,
+          audioUrl,
         };
       });
 
       console.log('Converted call records:', callRecords.length);
       console.log('First call record:', callRecords[0]);
+      console.log('Audio URL field:', audioUrlField?.name);
+      console.log('Sample audioUrl:', callRecords[0]?.audioUrl);
 
-      // Fetch audio files from URLs if audioUrl field exists in metadata
-      const audioUrlField = selectedSchema.fields.find(f => 
-        f.name.toLowerCase().includes('audiourl') || 
-        f.name.toLowerCase().includes('audio_url') ||
-        f.name.toLowerCase().includes('file')
-      );
-
-      if (audioUrlField) {
+      // Fetch audio files from URLs if audio field was found
+      if (audioUrlField && audioFolderPath.trim()) {
         toast.info('Fetching audio files...');
         const { fetchAudioFilesForCalls } = await import('@/lib/csv-parser');
         const callsWithAudio = await fetchAudioFilesForCalls(callRecords);

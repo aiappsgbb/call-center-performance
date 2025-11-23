@@ -54,10 +54,7 @@ function App() {
         
         if (migrationResult.migrated > 0) {
           console.log(`✅ Auto-migration complete: ${migrationResult.migrated} calls migrated`);
-          toast({
-            title: 'Schema Migration Complete',
-            description: `Successfully migrated ${migrationResult.migrated} existing call(s) to new schema system.`,
-          });
+          toast.success(`Schema Migration Complete: Successfully migrated ${migrationResult.migrated} existing call(s) to new schema system.`);
         }
         
         // Load active schema
@@ -95,11 +92,7 @@ function App() {
         }
       } catch (error) {
         console.error('❌ Schema initialization error:', error);
-        toast({
-          title: 'Schema Initialization Error',
-          description: 'Failed to initialize schema system. Some features may not work correctly.',
-          variant: 'destructive',
-        });
+        toast.error('Schema Initialization Error: Failed to initialize schema system. Some features may not work correctly.');
       } finally {
         setSchemaLoading(false);
       }
@@ -224,10 +217,7 @@ function App() {
       console.log(`📋 Loaded ${schemaRules.length} rules for ${schema.name}`);
     }
     
-    toast({
-      title: 'Schema Changed',
-      description: `Now using ${schema.name} v${schema.version}`,
-    });
+    toast.success(`Schema Changed: Now using ${schema.name} v${schema.version}`);
   };
 
   const handleMigration = (keepCalls: boolean) => {
@@ -242,17 +232,11 @@ function App() {
         updatedAt: new Date().toISOString(),
       }));
       setCalls(updatedCalls);
-      toast({
-        title: 'Migration Complete',
-        description: `${updatedCalls.length} call(s) migrated to ${pendingSchema.name}`,
-      });
+      toast.success(`Migration Complete: ${updatedCalls.length} call(s) migrated to ${pendingSchema.name}`);
     } else {
       // Clear calls and start fresh
       setCalls([]);
-      toast({
-        title: 'Starting Fresh',
-        description: `All calls cleared. Now using ${pendingSchema.name}`,
-      });
+      toast.success(`Starting Fresh: All calls cleared. Now using ${pendingSchema.name}`);
     }
 
     applySchemaChange(pendingSchema);

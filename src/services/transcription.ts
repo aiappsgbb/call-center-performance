@@ -1,5 +1,6 @@
 import { STTCaller, STTCallOptions } from '../STTCaller';
 import { CallRecord, AzureSpeechConfig, CallSentimentSegment } from '../types/call';
+import { SchemaDefinition } from '../types/schema';
 import { azureOpenAIService } from './azure-openai';
 import { DEFAULT_CALL_CENTER_LANGUAGES } from '@/lib/speech-languages';
 
@@ -42,6 +43,7 @@ class TranscriptionService {
    */
   async transcribeCall(
     call: CallRecord,
+    schema: SchemaDefinition | null,
     options: STTCallOptions = {},
     onProgress?: (status: string) => void
   ): Promise<CallRecord> {
@@ -119,11 +121,12 @@ class TranscriptionService {
           sentimentSummary = sentiment.summary;
 
           // Second pass: Analyze overall sentiment for analytics
-          if (result.transcript && result.transcript.trim().length > 0) {
+          if (result.transcript && result.transcript.trim().length > 0 && schema) {
             overallSentiment = await azureOpenAIService.analyzeOverallSentiment(
               call.id,
               result.transcript,
-              call.metadata
+              call.metadata,
+              schema
             );
             console.log(`✓ Overall sentiment: ${overallSentiment}`);
           }
@@ -158,9 +161,14 @@ class TranscriptionService {
           onProgress?.('Starting automatic evaluation...');
           console.log(`🤖 Auto-evaluating call ${call.id}...`);
           
+          if (!schema) {
+            throw new Error('Schema is required for evaluation');
+          }
+          
           const evaluation = await azureOpenAIService.evaluateCall(
             result.transcript,
             call.metadata,
+            schema,
             call.id
           );
 
@@ -205,7 +213,8 @@ class TranscriptionService {
     calls: CallRecord[],
     options: STTCallOptions = {},
     onProgress?: (callId: string, status: string, completed: number, total: number, completedCall?: CallRecord) => void,
-    concurrency: number = 5
+    concurrency: number = 5,
+    schema: SchemaDefinition | null = null
   ): Promise<CallRecord[]> {
     if (!this.sttCaller) {
       throw new Error('Transcription service not initialized. Please configure Azure Speech settings first.');
@@ -241,6 +250,7 @@ class TranscriptionService {
         console.log(`🚀 [PARALLEL] Starting transcription for call ${call.id} (${call.metadata.borrowerName}) at ${new Date().toISOString()}`);
         return this.transcribeCall(
           call,
+          schema,
           options,
           (status) => {
             console.log(`📊 [PARALLEL] ${call.id}: ${status}`);
@@ -305,7 +315,8 @@ class TranscriptionService {
   async transcribeCalls(
     calls: CallRecord[],
     options: STTCallOptions = {},
-    onProgress?: (callId: string, status: string, index: number, total: number) => void
+    onProgress?: (callId: string, status: string, index: number, total: number) => void,
+    schema: SchemaDefinition | null = null
   ): Promise<CallRecord[]> {
     if (!this.sttCaller) {
       throw new Error('Transcription service not initialized. Please configure Azure Speech settings first.');
@@ -323,6 +334,7 @@ class TranscriptionService {
       try {
         const result = await this.transcribeCall(
           call,
+          schema,
           options,
           (status) => onProgress?.(call.id, status, i + 1, total)
         );

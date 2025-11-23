@@ -284,6 +284,28 @@ export function readFileAsText(file: File): Promise<string> {
 }
 
 /**
+ * Get all sheet names from an Excel file
+ */
+export function getExcelSheetNames(file: File): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        resolve(workbook.SheetNames);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    
+    reader.onerror = (e) => reject(e);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
  * Read Excel file and extract data from specific sheet
  */
 export function readExcelFile(file: File, sheetName: string = 'audio related info'): Promise<CSVRow[]> {
