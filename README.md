@@ -50,5 +50,6 @@ The Azure Services dialog stores settings in `localStorage` and also mirrors the
 - `public/audio` – HTTP-served audio files
 
 ## License
+test
 
 MIT. See [LICENSE](LICENSE).
