@@ -232,8 +232,11 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
         id: df.suggestedFieldId,
         name: df.suggestedFieldId,
         displayName: df.suggestedDisplayName,
-        dataType: df.inferredType,
+        type: df.inferredType,
         semanticRole: df.semanticRole,
+        participantLabel: df.semanticRole === 'participant_1' ? participant1Label : 
+                         df.semanticRole === 'participant_2' ? participant2Label : 
+                         undefined,
         columnMapping: df.columnName,
         required: df.required,
         showInTable: df.showInTable,
@@ -244,25 +247,28 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       }));
 
       // Create schema
-      const newSchema: Omit<SchemaDefinition, 'id' | 'createdAt' | 'updatedAt'> = {
+      const newSchema: SchemaDefinition = {
+        id: `schema-${Date.now()}`,
         name: schemaName,
         version: '1.0.0',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         businessContext: businessContext,
-        participantLabels: {
-          participant_1: participant1Label,
-          participant_2: participant2Label,
-        },
+        excelFileName: file?.name,
         fields: fieldDefinitions,
         relationships: [],
-        analyticsViews: [],
       };
 
-      const savedSchema = await createSchema(newSchema);
+      const result = createSchema(newSchema);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create schema');
+      }
       
       toast.success(`Schema "${schemaName}" created successfully!`);
       
       if (onSchemaCreated) {
-        onSchemaCreated(savedSchema);
+        onSchemaCreated(newSchema);
       }
 
       onOpenChange(false);

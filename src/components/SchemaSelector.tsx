@@ -8,10 +8,11 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Gear } from '@phosphor-icons/react';
+import { Plus, Gear, Sparkle } from '@phosphor-icons/react';
 import { SchemaDefinition } from '@/types/schema';
 import { getAllSchemas, setActiveSchema } from '@/services/schema-manager';
 import { SchemaManagerDialog } from '@/components/SchemaManagerDialog';
+import { SchemaDiscoveryWizard } from '@/components/SchemaDiscoveryWizard';
 
 interface SchemaSelectorProps {
   activeSchema: SchemaDefinition | null;
@@ -35,6 +36,7 @@ export function SchemaSelector({
   const [schemas, setSchemas] = useState<SchemaDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
 
   useEffect(() => {
     loadSchemas();
@@ -58,6 +60,12 @@ export function SchemaSelector({
       setActiveSchema(selected.id);
       onSchemaChange(selected);
     }
+  };
+
+  const handleSchemaCreated = (schema: SchemaDefinition) => {
+    loadSchemas();
+    setActiveSchema(schema.id);
+    onSchemaChange(schema);
   };
 
   if (loading) {
@@ -137,16 +145,15 @@ export function SchemaSelector({
         <Gear className="h-4 w-4" />
       </Button>
 
-      {onCreateSchema && (
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onCreateSchema}
-          title="Create new schema"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      )}
+      <Button
+        variant="default"
+        size="icon"
+        onClick={() => setDiscoveryOpen(true)}
+        title="Discover schema from Excel file"
+        className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
+      >
+        <Sparkle className="h-4 w-4" />
+      </Button>
 
       <SchemaManagerDialog
         open={managerOpen}
@@ -157,6 +164,12 @@ export function SchemaSelector({
             loadSchemas();
           }
         }}
+      />
+
+      <SchemaDiscoveryWizard
+        open={discoveryOpen}
+        onOpenChange={setDiscoveryOpen}
+        onSchemaCreated={handleSchemaCreated}
       />
     </div>
   );
