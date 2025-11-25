@@ -119,7 +119,7 @@ export function TranscriptConversation({
       </Card>
 
       <ScrollArea className="h-[450px] border border-border rounded-lg p-6 bg-muted/20">
-        <div className="space-y-4">
+        <div className="space-y-4 max-w-full">
           {sortedPhrases.map((phrase, index) => {
             const speaker = getSpeakerName(phrase.speaker);
             const isAgent = speaker.isAgent;
@@ -132,7 +132,7 @@ export function TranscriptConversation({
             return (
               <div
                 key={index}
-                className={`flex gap-3 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}
+                className={`flex gap-3 w-full ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}
               >
                 <Avatar className={`flex-shrink-0 ${isAgent ? 'bg-primary/10' : 'bg-accent/20'}`}>
                   <AvatarFallback className={isAgent ? 'text-primary' : 'text-accent'}>
@@ -144,7 +144,7 @@ export function TranscriptConversation({
                   </AvatarFallback>
                 </Avatar>
 
-                <div className={`flex-1 space-y-1 ${isAgent ? 'items-start' : 'items-end'} flex flex-col`}>
+                <div className={`flex-1 min-w-0 space-y-1 ${isAgent ? 'items-start' : 'items-end'} flex flex-col`}>
                   <div className={`flex items-center gap-2 ${isAgent ? 'flex-row' : 'flex-row-reverse'}`}>
                     <span className="text-xs font-semibold">{speaker.name}</span>
                     <Badge variant="outline" className="text-[10px] h-4 px-1">
@@ -156,7 +156,7 @@ export function TranscriptConversation({
                       </Badge>
                     )}
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 max-w-full">
                     {showBadge && (
                       <Badge 
                         variant="secondary" 
@@ -166,13 +166,13 @@ export function TranscriptConversation({
                       </Badge>
                     )}
                     <div
-                      className={`rounded-2xl px-4 py-2.5 max-w-[85%] ${
+                      className={`rounded-2xl px-4 py-2.5 max-w-[75%] ${
                         isAgent
                           ? 'bg-primary/10 text-foreground rounded-tl-sm'
-                          : 'bg-accent/30 text-foreground rounded-tr-sm'
+                          : 'bg-accent/30 text-foreground rounded-tr-sm ml-auto'
                       }`}
                     >
-                      <p className="text-sm leading-relaxed">{phrase.text || phrase.lexical}</p>
+                      <p className="text-sm leading-relaxed break-words">{phrase.text || phrase.lexical}</p>
                     </div>
                   </div>
                 </div>

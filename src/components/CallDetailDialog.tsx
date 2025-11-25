@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -12,10 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { AzureServicesConfig } from '@/types/config';
 import { azureOpenAIService, getActiveEvaluationCriteria } from '@/services/azure-openai';
 import { STTCaller } from '../STTCaller';
 import { getCriterionById } from '@/lib/evaluation-criteria';
+import { DynamicDetailView, DynamicDetailSummary } from '@/components/DynamicDetailView';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, MinusCircle, Sparkle, Microphone } from '@phosphor-icons/react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -26,6 +29,7 @@ import { DEFAULT_CALL_CENTER_LANGUAGES } from '@/lib/speech-languages';
 
 interface CallDetailDialogProps {
   call: CallRecord;
+  schema: SchemaDefinition;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onUpdate: (call: CallRecord) => void;
@@ -33,6 +37,7 @@ interface CallDetailDialogProps {
 
 export function CallDetailDialog({
   call,
+  schema,
   open,
   onOpenChange,
   onUpdate,
@@ -44,8 +49,20 @@ export function CallDetailDialog({
   
   const [transcribing, setTranscribing] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | undefined>(undefined);
 
   const isProcessing = call.status === 'processing' || transcribing;
+
+  // Create blob URL for audio file
+  useEffect(() => {
+    if (call.audioFile && call.audioFile instanceof Blob) {
+      const url = URL.createObjectURL(call.audioFile);
+      setAudioUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else if (call.metadata?.audioUrl) {
+      setAudioUrl(call.metadata.audioUrl);
+    }
+  }, [call.audioFile, call.metadata?.audioUrl]);
 
   const handleTranscribe = async () => {
     if (!call.audioFile) {
@@ -137,7 +154,8 @@ export function CallDetailDialog({
               overallSentiment = await azureOpenAIService.analyzeOverallSentiment(
                 call.id,
                 result.transcript,
-                call.metadata
+                call.metadata,
+                schema
               );
             }
             
@@ -218,6 +236,7 @@ export function CallDetailDialog({
       const evaluation = await azureOpenAIService.evaluateCall(
         call.transcript,
         call.metadata,
+        schema,
         call.id
       );
 
@@ -241,14 +260,17 @@ export function CallDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="!max-w-[80vw] w-[80vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div>
               <DialogTitle className="text-2xl">Call Details</DialogTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                {call.metadata.agentName} → {call.metadata.borrowerName}
-              </p>
+              <DialogDescription className="sr-only">
+                View and manage call transcript, evaluation, and metadata
+              </DialogDescription>
+              <div className="mt-2">
+                <DynamicDetailSummary metadata={call.metadata} schema={schema} />
+              </div>
             </div>
             {call.evaluation && (
               <div className="text-right">
@@ -275,40 +297,67 @@ export function CallDetailDialog({
           </TabsList>
 
           <TabsContent value="metadata" className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Agent</h4>
-                <p className="font-medium">{call.metadata.agentName}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Product</h4>
-                <p className="font-medium">{call.metadata.product}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Borrower</h4>
-                <p className="font-medium">{call.metadata.borrowerName}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Nationality</h4>
-                <p className="font-medium">{call.metadata.nationality}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">
-                  Days Past Due
-                </h4>
-                <p className="font-medium">{call.metadata.daysPastDue}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground">Due Amount</h4>
-                <p className="font-medium">{call.metadata.dueAmount.toFixed(2)}</p>
-              </div>
-              <div className="col-span-2">
-                <h4 className="text-sm font-medium text-muted-foreground">
-                  Follow-up Status
-                </h4>
-                <p className="font-medium">{call.metadata.followUpStatus}</p>
-              </div>
-            </div>
+            <DynamicDetailView metadata={call.metadata} schema={schema} />
+            
+            {/* Calculated Metrics Section */}
+            {schema.relationships && schema.relationships.length > 0 && (() => {
+              const calculatedMetrics = schema.relationships
+                .filter(rel => rel.type === 'complex' && rel.formula)
+                .map(rel => ({
+                  relationship: rel,
+                  value: call.metadata[`calc_${rel.id}`]
+                }))
+                .filter(item => item.value !== undefined);
+              
+              if (calculatedMetrics.length === 0) return null;
+              
+              return (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <span className="text-lg">🧮</span>
+                      Calculated Metrics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {calculatedMetrics.map(({ relationship, value }) => (
+                      <div key={relationship.id} className="border-b border-border last:border-0 pb-3 last:pb-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm">
+                              {relationship.displayName || relationship.id}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {relationship.description}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono text-sm font-semibold">
+                              {typeof value === 'number' ? value.toFixed(2) : String(value)}
+                            </div>
+                            {relationship.outputType && (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {relationship.outputType}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {relationship.formula && (
+                          <details className="mt-2">
+                            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                              Show formula
+                            </summary>
+                            <pre className="mt-2 text-xs bg-muted p-2 rounded overflow-x-auto">
+                              {relationship.formula}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="transcript">
@@ -362,8 +411,14 @@ export function CallDetailDialog({
                 {call.transcriptPhrases && call.transcriptPhrases.length > 0 ? (
                   <TranscriptConversation
                     phrases={call.transcriptPhrases}
-                    agentName={call.metadata.agentName}
-                    borrowerName={call.metadata.borrowerName}
+                    agentName={(() => {
+                      const agentField = schema.fields.find(f => f.semanticRole === 'participant_1');
+                      return agentField ? String(call.metadata[agentField.id] || agentField.participantLabel || 'Agent') : 'Agent';
+                    })()}
+                    borrowerName={(() => {
+                      const borrowerField = schema.fields.find(f => f.semanticRole === 'participant_2');
+                      return borrowerField ? String(call.metadata[borrowerField.id] || borrowerField.participantLabel || 'Customer') : 'Customer';
+                    })()}
                     locale={call.transcriptLocale}
                     duration={call.transcriptDuration}
                   />
@@ -758,7 +813,7 @@ export function CallDetailDialog({
 
             {call.sentimentSegments && call.sentimentSegments.length > 0 && (
               <CallSentimentPlayer
-                audioUrl={call.metadata.audioUrl}
+                audioUrl={audioUrl}
                 durationMilliseconds={call.transcriptDuration}
                 segments={call.sentimentSegments}
                 sentimentSummary={call.sentimentSummary}

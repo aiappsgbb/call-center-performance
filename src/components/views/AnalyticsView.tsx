@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { CallRecord } from '@/types/call';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { SchemaDefinition, AnalyticsView as AnalyticsViewType } from '@/types/schema';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +25,10 @@ import {
   aggregateNationalityAnalytics,
   aggregateOutcomeAnalytics,
   aggregateBorrowerAnalytics,
+  aggregateTopicAnalytics,
+  aggregateKeyPhraseAnalytics,
+  calculateOverviewKPIs,
+  formatDuration,
 } from '@/lib/analytics';
 import { CriteriaAnalyticsChart } from '@/components/analytics/CriteriaAnalyticsChart';
 import { PerformanceTrendChart } from '@/components/analytics/PerformanceTrendChart';
@@ -30,17 +37,40 @@ import { RiskSegmentationChart } from '@/components/analytics/RiskSegmentationCh
 import { NationalityAnalysisChart } from '@/components/analytics/NationalityAnalysisChart';
 import { OutcomeCorrelationChart } from '@/components/analytics/OutcomeCorrelationChart';
 import { BorrowerInsightsChart } from '@/components/analytics/BorrowerInsightsChart';
+import { CustomAnalyticsChart } from '@/components/analytics/CustomAnalyticsChart';
+import { KeyPhrasesCloud } from '@/components/analytics/KeyPhrasesCloud';
+import { AnalyticsConfigWizard } from '@/components/AnalyticsConfigWizard';
 import { getCriterionById } from '@/lib/evaluation-criteria';
 import { regenerateInsights } from '@/services/azure-openai';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Sparkles, Loader2, TrendingUp, TrendingDown, Minus, Phone, Clock, SmilePlus, Hash } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 
-export function AnalyticsView() {
+interface AnalyticsViewProps {
+  activeSchema: SchemaDefinition | null;
+  schemaLoading: boolean;
+}
+
+export function AnalyticsView({ activeSchema, schemaLoading }: AnalyticsViewProps) {
   const [calls, setCalls] = useLocalStorage<CallRecord[]>('calls', []);
   const [regenerationMode, setRegenerationMode] = useState<'missing' | 'all'>('missing');
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regenerationProgress, setRegenerationProgress] = useState({ current: 0, total: 0, callId: '' });
   const [showRegenerationDialog, setShowRegenerationDialog] = useState(false);
+  const [customViews, setCustomViews] = useState<any[]>([]);
+  const [viewsRefreshKey, setViewsRefreshKey] = useState(0);
 
   const evaluatedCalls = (calls || []).filter((c) => c.evaluation);
   const criteriaAnalytics = calculateCriteriaAnalytics(calls || []);
@@ -53,13 +83,46 @@ export function AnalyticsView() {
   const outcomeAnalytics = aggregateOutcomeAnalytics(calls || []);
   const borrowerAnalytics = aggregateBorrowerAnalytics(calls || []);
 
+  // Topic and key phrase analytics
+  const topicAnalytics = useMemo(() => aggregateTopicAnalytics(calls || []), [calls]);
+  const keyPhraseAnalytics = useMemo(() => aggregateKeyPhraseAnalytics(calls || []), [calls]);
+  const overviewKPIs = useMemo(() => calculateOverviewKPIs(calls || []), [calls]);
+
+  // Load custom analytics views from localStorage
+  useEffect(() => {
+    if (activeSchema) {
+      const storageKey = `analytics-views-${activeSchema.id}`;
+      const savedViews = localStorage.getItem(storageKey);
+      if (savedViews) {
+        try {
+          const parsed: AnalyticsViewType[] = JSON.parse(savedViews);
+          setCustomViews(parsed.filter(v => v.enabled));
+        } catch (error) {
+          console.error('Failed to load custom analytics views:', error);
+        }
+      } else {
+        setCustomViews([]);
+      }
+    }
+  }, [activeSchema, viewsRefreshKey]);
+
+  const handleViewsSaved = () => {
+    setViewsRefreshKey(prev => prev + 1);
+  };
+
   const handleRegenerateInsights = async () => {
+    if (!activeSchema) {
+      toast.error('No active schema available');
+      return;
+    }
+
     setIsRegenerating(true);
     setRegenerationProgress({ current: 0, total: 0, callId: '' });
 
     try {
       const updatedCalls = await regenerateInsights(
         calls || [],
+        activeSchema,
         regenerationMode,
         (current, total, callId) => {
           setRegenerationProgress({ current, total, callId });
@@ -113,6 +176,11 @@ export function AnalyticsView() {
 
   return (
     <div className="space-y-6">
+      {/* Analytics Configuration */}
+      <div className="flex justify-end">
+        <AnalyticsConfigWizard activeSchema={activeSchema} onViewsSaved={handleViewsSaved} />
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <Card>
@@ -184,9 +252,10 @@ export function AnalyticsView() {
       </div>
 
       {/* Tabbed Analytics */}
-      <Tabs defaultValue="performance" className="space-y-4">
+      <Tabs defaultValue="overview" className="space-y-4">
         <div className="flex items-center justify-between">
-          <TabsList className="grid grid-cols-7 w-full max-w-4xl">
+          <TabsList className="grid grid-cols-8 w-full max-w-5xl">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="product">Product</TabsTrigger>
             <TabsTrigger value="risk">Risk</TabsTrigger>
@@ -215,6 +284,238 @@ export function AnalyticsView() {
             )}
           </Button>
         </div>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          {/* KPI Cards Row */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <SmilePlus className="h-4 w-4" />
+                  Satisfied %
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-green-600">
+                  {overviewKPIs.satisfiedPercentage.toFixed(1)}%
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Positive sentiment calls
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Phone className="h-4 w-4" />
+                  Total Calls
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{overviewKPIs.totalCalls}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {overviewKPIs.evaluatedCalls} evaluated
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Avg Handling Time
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  {formatDuration(overviewKPIs.avgHandlingTimeMs)}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {Math.round(overviewKPIs.avgHandlingTimeMs / 1000)}s average
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Hash className="h-4 w-4" />
+                  Avg Score
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">{overviewKPIs.avgScore.toFixed(1)}%</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Quality score
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Charts Row - Topics Overview + Handling Time By Topic */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Topics Overview Pie Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Topics Overview</CardTitle>
+                <CardDescription>
+                  Distribution of calls by topic sentiment
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {topicAnalytics.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Positive', value: overviewKPIs.sentimentDistribution.positive, color: '#22c55e' },
+                          { name: 'Neutral', value: overviewKPIs.sentimentDistribution.neutral, color: '#3b82f6' },
+                          { name: 'Negative', value: overviewKPIs.sentimentDistribution.negative, color: '#ef4444' },
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={2}
+                        dataKey="value"
+                        label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
+                      >
+                        {[
+                          { name: 'Positive', color: '#22c55e' },
+                          { name: 'Neutral', color: '#3b82f6' },
+                          { name: 'Negative', color: '#ef4444' },
+                        ].map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number) => `${value.toFixed(1)}%`} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    No topic data available. Re-evaluate calls with a topic taxonomy defined.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Avg Handling Time By Topic Bar Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Avg Handling Time By Topic</CardTitle>
+                <CardDescription>
+                  Average call duration per topic (in seconds)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {topicAnalytics.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart
+                      layout="vertical"
+                      data={topicAnalytics.slice(0, 8).map((t) => ({
+                        topic: t.topicName.length > 20 ? t.topicName.slice(0, 20) + '...' : t.topicName,
+                        duration: Math.round(t.avgHandlingTimeMs / 1000),
+                        calls: t.callCount,
+                      }))}
+                      margin={{ top: 5, right: 30, left: 100, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis type="number" unit="s" />
+                      <YAxis type="category" dataKey="topic" width={90} />
+                      <Tooltip
+                        formatter={(value: number, name: string) => [
+                          name === 'duration' ? `${value}s` : value,
+                          name === 'duration' ? 'Avg Duration' : 'Calls',
+                        ]}
+                      />
+                      <Bar dataKey="duration" fill="#8884d8" name="duration" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    No topic data available. Re-evaluate calls with a topic taxonomy defined.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Trending Topics Table + Key Phrases Cloud */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Trending Topics Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Trending Topics</CardTitle>
+                <CardDescription>
+                  Most frequently discussed topics across all calls
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {topicAnalytics.length > 0 ? (
+                  <ScrollArea className="h-[300px]">
+                    <div className="space-y-2">
+                      {topicAnalytics.slice(0, 10).map((topic, idx) => (
+                        <div
+                          key={topic.topicId}
+                          className="flex items-center justify-between p-3 border rounded-lg"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-muted-foreground font-mono text-sm w-6">
+                              #{idx + 1}
+                            </span>
+                            <div>
+                              <div className="font-medium">{topic.topicName}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {topic.callCount} calls • {topic.avgConfidence.toFixed(0)}% confidence
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={
+                                topic.dominantSentiment === 'positive'
+                                  ? 'default'
+                                  : topic.dominantSentiment === 'negative'
+                                  ? 'destructive'
+                                  : 'secondary'
+                              }
+                            >
+                              {topic.dominantSentiment}
+                            </Badge>
+                            {topic.trend === 'up' && (
+                              <TrendingUp className="h-4 w-4 text-green-500" />
+                            )}
+                            {topic.trend === 'down' && (
+                              <TrendingDown className="h-4 w-4 text-red-500" />
+                            )}
+                            {topic.trend === 'stable' && (
+                              <Minus className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+                    No topic data available. Re-evaluate calls with a topic taxonomy defined.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Key Phrases Word Cloud */}
+            <KeyPhrasesCloud
+              phrases={keyPhraseAnalytics}
+              maxPhrases={30}
+              title="Key Phrases"
+              description="Most frequently mentioned phrases across all calls"
+            />
+          </div>
+        </TabsContent>
 
         {/* Performance Tab (existing analytics) */}
         <TabsContent value="performance" className="space-y-6">
@@ -307,6 +608,32 @@ export function AnalyticsView() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Custom Analytics Views */}
+      {customViews.length > 0 && (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Custom Analytics</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {customViews.map((view) => (
+                <Card key={view.id}>
+                  <CardHeader>
+                    <CardTitle className="text-base">{view.name}</CardTitle>
+                    {view.description && (
+                      <p className="text-sm text-muted-foreground">{view.description}</p>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <CustomAnalyticsChart view={view} calls={calls} schema={activeSchema!} />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Regeneration Dialog */}
       <Dialog open={showRegenerationDialog} onOpenChange={setShowRegenerationDialog}>

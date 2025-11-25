@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { defaultCalls } from '@/lib/default-calls';
 import { CallRecord } from '@/types/call';
+import { SchemaDefinition } from '@/types/schema';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Upload, MagnifyingGlass, ArrowCounterClockwise, Microphone, FileCsv } from '@phosphor-icons/react';
@@ -19,28 +20,28 @@ import { toast } from 'sonner';
 interface CallsViewProps {
   batchProgress: { completed: number; total: number } | null;
   setBatchProgress: (progress: { completed: number; total: number } | null) => void;
+  activeSchema: SchemaDefinition | null;
+  schemaLoading: boolean;
 }
 
-export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
+export function CallsView({ batchProgress, setBatchProgress, activeSchema, schemaLoading }: CallsViewProps) {
   const [calls, setCalls] = useLocalStorage<CallRecord[]>('calls', defaultCalls);
-  const [callsRestored, setCallsRestored] = useState(false);
   
   // Restore audio files from IndexedDB on mount
   useEffect(() => {
-    if (calls && calls.length > 0 && !callsRestored) {
+    if (calls && calls.length > 0) {
       restoreAudioFilesFromStorage(calls).then((restoredCalls) => {
         const audioCount = restoredCalls.filter(c => c.audioFile).length;
         if (audioCount > 0) {
           console.log(`✅ Restored ${audioCount} audio files from IndexedDB`);
           setCalls(restoredCalls);
         }
-        setCallsRestored(true);
       }).catch((error) => {
         console.error('Failed to restore audio files:', error);
-        setCallsRestored(true);
       });
     }
-  }, [calls, callsRestored, setCalls]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   console.log('=== CALLSVIEW RENDER ===');
   console.log('Calls loaded:', calls?.length || 0);
   console.log('First call:', calls?.[0]);
@@ -228,7 +229,8 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
             });
           }
         },
-        5 // Process 5 calls at a time
+        5, // Process 5 calls at a time
+        activeSchema // Pass schema for sentiment analysis and evaluation
       );
 
       // Update all calls with their results
@@ -286,16 +288,35 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
   };
 
   const filteredCalls = (calls || []).filter((call) => {
+    // Filter by active schema
+    if (activeSchema && call.schemaId !== activeSchema.id) {
+      return false;
+    }
+    
+    // If no search query, include all calls for this schema
+    if (!searchQuery.trim()) {
+      return true;
+    }
+    
     const query = searchQuery.toLowerCase();
-    return (
-      call.metadata.agentName.toLowerCase().includes(query) ||
-      call.metadata.borrowerName.toLowerCase().includes(query) ||
-      call.metadata.product.toLowerCase().includes(query)
-    );
+    
+    // Search across all metadata fields that are strings
+    return Object.values(call.metadata || {}).some(value => {
+      if (typeof value === 'string') {
+        return value.toLowerCase().includes(query);
+      }
+      if (typeof value === 'number') {
+        return value.toString().includes(query);
+      }
+      return false;
+    });
   });
 
   const handleReset = () => {
-    setCalls(defaultCalls);
+    if (window.confirm('Are you sure you want to delete all call records? This action cannot be undone.')) {
+      setCalls([]);
+      toast.success('All call records deleted');
+    }
   };
 
   return (
@@ -357,16 +378,20 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
           </Button>
           <Button onClick={() => setImportCSVOpen(true)} variant="outline">
             <FileCsv className="mr-2" size={18} />
-            Import CSV
+            Import Metadata
           </Button>
-          <Button onClick={() => setUploadOpen(true)}>
+          <Button 
+            onClick={() => setUploadOpen(true)}
+            disabled={!activeSchema}
+            title={!activeSchema ? "Please select a schema first" : "Upload audio files to attach to existing records"}
+          >
             <Upload className="mr-2" size={18} />
-            Upload Calls
+            Upload Audio Files
           </Button>
         </div>
       </div>
 
-      {(!calls || calls.length === 0) && (
+      {(!calls || calls.length === 0) && !activeSchema && (
         <Card className="p-12 text-center">
           <div className="mx-auto max-w-md space-y-4">
             <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center">
@@ -378,17 +403,18 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
                 Upload your first batch of call recordings with metadata to get started
               </p>
             </div>
-            <Button onClick={() => setUploadOpen(true)}>
-              <Upload className="mr-2" size={18} />
-              Upload Your First Calls
+            <Button onClick={() => setImportCSVOpen(true)}>
+              <FileCsv className="mr-2" size={18} />
+              Import Metadata
             </Button>
           </div>
         </Card>
       )}
 
-      {calls && calls.length > 0 && (
+      {activeSchema && (
         <CallsTable
           calls={filteredCalls}
+          schema={activeSchema}
           onSelectCall={setSelectedCall}
           onUpdateCalls={onUpdateCalls}
           transcribingIds={transcribingIds}
@@ -409,8 +435,15 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
       <UploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
-        onUpload={(newCalls) => {
-          setCalls((prevCalls) => [...(prevCalls || []), ...newCalls]);
+        activeSchema={activeSchema}
+        existingCalls={calls || []}
+        onUpload={(updatedCalls) => {
+          // Update existing calls with audio files
+          setCalls((prevCalls) => {
+            const callMap = new Map((prevCalls || []).map(c => [c.id, c]));
+            updatedCalls.forEach(updated => callMap.set(updated.id, updated));
+            return Array.from(callMap.values());
+          });
           setUploadOpen(false);
         }}
       />
@@ -427,9 +460,10 @@ export function CallsView({ batchProgress, setBatchProgress }: CallsViewProps) {
         }}
       />
 
-      {selectedCall && (
+      {selectedCall && activeSchema && (
         <CallDetailDialog
           call={selectedCall}
+          schema={activeSchema}
           open={!!selectedCall}
           onOpenChange={(open) => !open && setSelectedCall(null)}
           onUpdate={(updatedCall) => {

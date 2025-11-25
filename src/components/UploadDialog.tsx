@@ -7,134 +7,169 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CallRecord, CallMetadata } from '@/types/call';
+import { CallRecord } from '@/types/call';
+import { SchemaDefinition, getSchemaAudioPath } from '@/types/schema';
 import { toast } from 'sonner';
+import { Upload } from '@phosphor-icons/react';
 
 interface UploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUpload: (calls: CallRecord[]) => void;
+  onUpload: (updatedCalls: CallRecord[]) => void;
+  activeSchema?: SchemaDefinition | null;
+  existingCalls: CallRecord[];
 }
 
-export function UploadDialog({ open, onOpenChange, onUpload }: UploadDialogProps) {
-  const [metadataText, setMetadataText] = useState('');
-  const [transcriptText, setTranscriptText] = useState('');
+export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, existingCalls }: UploadDialogProps) {
+  const [audioFiles, setAudioFiles] = useState<FileList | null>(null);
 
-  const parseMetadata = (text: string): CallMetadata[] => {
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) return [];
-
-    const metadata: CallMetadata[] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-      const parts = lines[i].split('\t');
-      if (parts.length >= 12) {
-        const fileTag = parts[4];
-        // Check if fileTag looks like a blob URL (contains .mp3, .wav, etc.)
-        const audioUrl = fileTag.match(/\.(mp3|wav|m4a|flac|ogg)$/i) ? fileTag : undefined;
-        
-        metadata.push({
-          time: parts[0],
-          billId: parts[1],
-          orderId: parts[2],
-          userId: parts[3],
-          fileTag: parts[4],
-          audioUrl: audioUrl, // Store the blob URL if it's an audio file
-          agentName: parts[5],
-          product: parts[6],
-          customerType: parts[7],
-          borrowerName: parts[8],
-          nationality: parts[9],
-          daysPastDue: parseInt(parts[10]) || 0,
-          dueAmount: parseFloat(parts[11]) || 0,
-          followUpStatus: parts[12] || '',
-        });
-      }
+  const handleUpload = async () => {
+    if (!audioFiles || audioFiles.length === 0) {
+      toast.error('Please select at least one audio file');
+      return;
     }
 
-    return metadata;
-  };
+    if (!activeSchema) {
+      toast.error('No active schema selected. Please select a schema first.');
+      return;
+    }
 
-  const handleUpload = () => {
+    if (!existingCalls || existingCalls.length === 0) {
+      toast.error('No existing records found. Please import metadata first.');
+      return;
+    }
+
     try {
-      const metadataList = parseMetadata(metadataText);
-      
-      if (metadataList.length === 0) {
-        toast.error('No valid metadata found. Please check your input format.');
+      const schemaAudioPath = getSchemaAudioPath(activeSchema);
+      const updatedCalls: CallRecord[] = [];
+      let matchedCount = 0;
+      let unmatchedFiles: string[] = [];
+
+      // Try to match each audio file to an existing record by filename
+      for (let i = 0; i < audioFiles.length; i++) {
+        const file = audioFiles[i];
+        const fileName = file.name;
+        
+        // Find matching call record by checking metadata for audio filename
+        const matchingCall = existingCalls.find(call => {
+          const audioField = Object.entries(call.metadata || {}).find(([key, value]) => 
+            typeof value === 'string' && 
+            (value === fileName || value.endsWith(`/${fileName}`) || value.includes(fileName))
+          );
+          return !!audioField;
+        });
+
+        if (matchingCall) {
+          // Create a blob URL for the audio file
+          const audioBlob = new Blob([file], { type: file.type });
+          const audioUrl = URL.createObjectURL(audioBlob);
+          
+          // Update the matching call with audio file
+          const updatedCall: CallRecord = {
+            ...matchingCall,
+            audioFile: file,
+            audioUrl: audioUrl,
+            status: 'uploaded',
+            updatedAt: new Date().toISOString(),
+          };
+          
+          updatedCalls.push(updatedCall);
+          matchedCount++;
+        } else {
+          unmatchedFiles.push(fileName);
+        }
+      }
+
+      if (updatedCalls.length === 0) {
+        toast.error('No audio files matched existing records. Check filenames in metadata.');
         return;
       }
 
-      const calls: CallRecord[] = metadataList.map((metadata) => {
-        const parsedCreatedAt = metadata.time ? new Date(metadata.time) : new Date();
-        const createdAtDate = Number.isNaN(parsedCreatedAt.getTime()) ? new Date() : parsedCreatedAt;
+      // Store audio files in IndexedDB with schema organization
+      const { storeAudioFiles } = await import('@/lib/audio-storage');
+      await storeAudioFiles(updatedCalls.map(call => ({
+        id: call.id,
+        audioFile: call.audioFile!,
+        schemaId: activeSchema.id
+      })));
 
-        return {
-        id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        metadata,
-        // Only add transcript if manually provided OR if no audioUrl (for testing)
-        transcript: transcriptText || (!metadata.audioUrl ? `Sample transcript for call with ${metadata.borrowerName}. This is a placeholder transcript that would normally come from audio transcription. The agent ${metadata.agentName} spoke with the customer about ${metadata.product} with ${metadata.daysPastDue} days past due and amount ${metadata.dueAmount}.` : undefined),
-        // Set status based on whether we have audio URL or manual transcript
-        status: metadata.audioUrl ? 'uploaded' : (transcriptText ? 'transcribed' : 'transcribed'),
-          createdAt: createdAtDate.toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      });
-
-      onUpload(calls);
-      toast.success(`Successfully uploaded ${calls.length} call(s)`);
-      setMetadataText('');
-      setTranscriptText('');
+      onUpload(updatedCalls);
+      
+      if (unmatchedFiles.length > 0) {
+        toast.warning(`Matched ${matchedCount} file(s). ${unmatchedFiles.length} unmatched: ${unmatchedFiles.slice(0, 3).join(', ')}${unmatchedFiles.length > 3 ? '...' : ''}`);
+      } else {
+        toast.success(`Successfully attached ${matchedCount} audio file(s) to existing records`);
+      }
+      
+      setAudioFiles(null);
+      onOpenChange(false);
     } catch (error) {
-      toast.error('Failed to parse metadata. Please check your format.');
+      toast.error('Failed to upload audio files');
       console.error(error);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Upload Calls</DialogTitle>
+          <DialogTitle>Upload Audio Files</DialogTitle>
           <DialogDescription>
-            Paste your call metadata (tab-separated format from Excel) below.
+            {activeSchema ? (
+              <>
+                Select audio files to attach to existing records in <strong>{activeSchema.name}</strong>.
+                <br />
+                <span className="text-xs text-muted-foreground">
+                  Files will be matched by filename to metadata records. {existingCalls?.length || 0} record(s) available.
+                </span>
+              </>
+            ) : (
+              'Please select a schema before uploading audio files.'
+            )}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="metadata">Call Metadata (Tab-separated)</Label>
-            <Textarea
-              id="metadata"
-              placeholder="TIME	BILLID	ORDERID	user_id	file tag	Agent name	Product	Customer type	Borrower name	Nationality	Days past due	Due amount	Follow up status
-2025/9/3 17:52:08	20250429100109304		100016218425	938ec846f424419ea18b29533567f40b.mp3	Raj	SNPL	Borrower	MUHAMMAD ABU BAKAR	Pakistan	95	1348.34	HE WILL PAY..."
-              value={metadataText}
-              onChange={(e) => setMetadataText(e.target.value)}
-              className="font-mono text-xs min-h-[200px]"
+            <Label htmlFor="audio-files">Audio Files</Label>
+            <Input
+              id="audio-files"
+              type="file"
+              accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg"
+              multiple
+              onChange={(e) => setAudioFiles(e.target.files)}
+              className="cursor-pointer"
             />
+            {audioFiles && audioFiles.length > 0 && (
+              <div className="mt-2 p-3 bg-muted rounded-md">
+                <p className="text-sm font-medium mb-2">Selected files ({audioFiles.length}):</p>
+                <ul className="text-xs space-y-1 max-h-[150px] overflow-y-auto">
+                  {Array.from(audioFiles).map((file, idx) => (
+                    <li key={idx} className="flex items-center gap-2">
+                      <Upload size={14} className="text-muted-foreground" />
+                      <span className="truncate">{file.name}</span>
+                      <span className="text-muted-foreground">
+                        ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
-              Copy and paste directly from Excel with headers included
+              Supported formats: MP3, WAV, M4A, FLAC, OGG
             </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="transcript">
-              Sample Transcript (Optional - for testing)
-            </Label>
-            <Textarea
-              id="transcript"
-              placeholder="Enter a sample transcript or leave empty to generate placeholder text..."
-              value={transcriptText}
-              onChange={(e) => setTranscriptText(e.target.value)}
-              className="min-h-[150px]"
-            />
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleUpload}>Upload Calls</Button>
+            <Button onClick={handleUpload} disabled={!audioFiles || audioFiles.length === 0 || !activeSchema}>
+              <Upload className="mr-2" size={18} />
+              Upload {audioFiles && audioFiles.length > 0 ? `${audioFiles.length} File(s)` : 'Files'}
+            </Button>
           </div>
         </div>
       </DialogContent>
