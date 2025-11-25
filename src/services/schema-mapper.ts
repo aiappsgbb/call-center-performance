@@ -1,4 +1,4 @@
-import { SchemaDefinition, FieldDefinition } from '@/types/schema';
+import { SchemaDefinition, FieldDefinition, FieldType } from '@/types/schema';
 import { executeFormula } from '@/lib/formula-executor';
 
 /**
@@ -16,16 +16,21 @@ export class SchemaMapper {
 
     // Map each field according to schema definition
     for (const field of schema.fields) {
-      const value = this.extractFieldValue(row, field);
+      const value = this.getFieldValue(row, field);
       metadata[field.id] = value;
     }
 
-    // Calculate derived fields from relationships
+    // Calculate derived fields from complex relationships (formulas)
     for (const relationship of schema.relationships || []) {
-      if (relationship.type === 'calculated' && relationship.formula) {
-        const result = executeFormula(relationship.formula, metadata);
-        if (result.success && relationship.resultFieldId) {
-          metadata[relationship.resultFieldId] = result.result;
+      if (relationship.type === 'complex' && relationship.formula) {
+        try {
+          const result = executeFormula(relationship.formula, metadata);
+          if (result.success) {
+            // Store the calculated result using relationship ID as the key
+            metadata[`calc_${relationship.id}`] = result.result;
+          }
+        } catch (error) {
+          console.warn(`Failed to execute formula for relationship ${relationship.id}:`, error);
         }
       }
     }
@@ -36,19 +41,19 @@ export class SchemaMapper {
   /**
    * Extract field value from row using column mapping and type coercion
    */
-  private static extractFieldValue(
+  private static getFieldValue(
     row: Record<string, any>,
     field: FieldDefinition
   ): any {
-    // Get raw value from row using column mapping
-    const rawValue = this.getRawValue(row, field.columnMapping);
+    // Get raw value from row using field name (which maps to column)
+    const rawValue = this.getRawValue(row, field.name);
 
     if (rawValue === undefined || rawValue === null || rawValue === '') {
-      return field.defaultValue ?? this.getDefaultForType(field.dataType);
+      return field.defaultValue ?? this.getDefaultForType(field.type);
     }
 
     // Type coercion based on field data type
-    return this.coerceValue(rawValue, field.dataType);
+    return this.coerceValue(rawValue, field.type);
   }
 
   /**
@@ -89,7 +94,7 @@ export class SchemaMapper {
   /**
    * Coerce raw value to appropriate type
    */
-  private static coerceValue(rawValue: any, dataType: FieldDefinition['dataType']): any {
+  private static coerceValue(rawValue: any, dataType: FieldType): any {
     const strValue = String(rawValue).trim();
 
     switch (dataType) {
@@ -105,7 +110,6 @@ export class SchemaMapper {
         return isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 
       case 'string':
-      case 'text':
       default:
         return strValue;
     }
@@ -114,7 +118,7 @@ export class SchemaMapper {
   /**
    * Get default value for data type
    */
-  private static getDefaultForType(dataType: FieldDefinition['dataType']): any {
+  private static getDefaultForType(dataType: FieldType): any {
     switch (dataType) {
       case 'number':
         return 0;
@@ -123,7 +127,6 @@ export class SchemaMapper {
       case 'date':
         return new Date().toISOString();
       case 'string':
-      case 'text':
       default:
         return '';
     }
@@ -141,7 +144,7 @@ export class SchemaMapper {
     const totalFields = schema.fields.length;
 
     for (const field of schema.fields) {
-      const value = this.getRawValue(row, field.columnMapping);
+      const value = this.getRawValue(row, field.name);
       if (value !== undefined) {
         matchCount++;
       }
@@ -194,14 +197,14 @@ export class SchemaMapper {
     const participant2Field = schema.fields.find(f => f.semanticRole === 'participant_2');
 
     if (participant1Field) {
-      const value = this.getRawValue(row, participant1Field.columnMapping);
+      const value = this.getRawValue(row, participant1Field.name);
       if (!value) {
         missingFields.push(participant1Field.displayName);
       }
     }
 
     if (participant2Field) {
-      const value = this.getRawValue(row, participant2Field.columnMapping);
+      const value = this.getRawValue(row, participant2Field.name);
       if (!value) {
         missingFields.push(participant2Field.displayName);
       }
@@ -210,7 +213,7 @@ export class SchemaMapper {
     // Check at least one classification field
     const classificationFields = schema.fields.filter(f => f.semanticRole === 'classification');
     const hasClassification = classificationFields.some(field => {
-      const value = this.getRawValue(row, field.columnMapping);
+      const value = this.getRawValue(row, field.name);
       return value !== undefined && value !== null && value !== '';
     });
 

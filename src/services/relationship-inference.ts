@@ -4,9 +4,9 @@
  */
 
 import type { SchemaDefinition, RelationshipDefinition } from '../types/schema';
-// These imports are for deprecated functions - not currently used
-// import { preparePrompt, extractJsonFromResponse } from '../lib/prompt-loader';
-// import { callAzureOpenAI } from '../lib/llmCaller';
+import { preparePrompt } from '../lib/prompt-loader';
+import { LLMCaller } from '../llmCaller';
+import { loadAzureConfigFromCookie } from '../lib/azure-config-storage';
 
 /**
  * Infers simple correlative relationships from field names and types
@@ -14,6 +14,89 @@ import type { SchemaDefinition, RelationshipDefinition } from '../types/schema';
 export async function inferSimpleRelationships(
   schema: SchemaDefinition
 ): Promise<RelationshipDefinition[]> {
+  try {
+    const config = loadAzureConfigFromCookie();
+    if (!config || !config.openAI?.endpoint || !config.openAI?.apiKey) {
+      throw new Error('Azure OpenAI configuration not found');
+    }
+
+    const configManager = {
+      async getConfig() { 
+        return {
+          authType: 'apiKey' as const,
+          endpoint: config.openAI.endpoint,
+          apiKey: config.openAI.apiKey,
+          deploymentName: config.openAI.deploymentName,
+          apiVersion: config.openAI.apiVersion,
+          reasoningEffort: config.openAI.reasoningEffort
+        };
+      },
+      async getEntraIdToken() { return null; },
+      getMaxRetries() { return 3; }
+    };
+
+    const llmCaller = new LLMCaller(configManager);
+
+    const prompt = await preparePrompt('relationship-inference-simple', {
+      businessContext: schema.businessContext,
+      schemaFieldsJson: JSON.stringify(schema.fields, null, 2)
+    });
+
+    const schema_def = {
+      name: 'SimpleRelationships',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          relationships: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                type: { type: 'string', enum: ['simple'] },
+                description: { type: 'string' },
+                involvedFields: {
+                  type: 'array',
+                  items: { type: 'string' }
+                },
+                reasoning: { type: 'string' }
+              },
+              required: ['id', 'type', 'description', 'involvedFields', 'reasoning'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['relationships'],
+        additionalProperties: false
+      }
+    };
+
+    const response = await llmCaller.callWithJsonValidation<{ relationships: RelationshipDefinition[] }>(
+      [{ role: 'user', content: prompt }],
+      { structuredOutputSchema: schema_def }
+    );
+
+    const result = response.parsed.relationships;
+    
+    // Validate and return relationships
+    if (Array.isArray(result)) {
+      return result.map((rel: any) => ({
+        id: rel.id || `simple_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'simple' as const,
+        description: rel.description || '',
+        involvedFields: rel.involvedFields || []
+      }));
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error inferring simple relationships:', error);
+    throw new Error(`Failed to infer simple relationships: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+  
+  /* DEPRECATED CODE
   try {
     const prompt = await preparePrompt('relationship-inference-simple', {
       businessContext: schema.businessContext,
@@ -51,6 +134,95 @@ export async function inferComplexRelationships(
   schema: SchemaDefinition,
   sampleData: Record<string, any>[]
 ): Promise<RelationshipDefinition[]> {
+  try {
+    const config = loadAzureConfigFromCookie();
+    if (!config || !config.openAI?.endpoint || !config.openAI?.apiKey) {
+      throw new Error('Azure OpenAI configuration not found');
+    }
+
+    const configManager = {
+      async getConfig() { 
+        return {
+          authType: 'apiKey' as const,
+          endpoint: config.openAI.endpoint,
+          apiKey: config.openAI.apiKey,
+          deploymentName: config.openAI.deploymentName,
+          apiVersion: config.openAI.apiVersion,
+          reasoningEffort: config.openAI.reasoningEffort
+        };
+      },
+      async getEntraIdToken() { return null; },
+      getMaxRetries() { return 3; }
+    };
+
+    const llmCaller = new LLMCaller(configManager);
+
+    const prompt = await preparePrompt('relationship-inference-complex', {
+      businessContext: schema.businessContext,
+      schemaFieldsJson: JSON.stringify(schema.fields, null, 2),
+      sampleRowCount: sampleData.length.toString(),
+      sampleDataJson: JSON.stringify(sampleData.slice(0, 10), null, 2) // Limit to 10 samples
+    });
+
+    const schema_def = {
+      name: 'ComplexRelationships',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          relationships: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                type: { type: 'string', enum: ['complex'] },
+                description: { type: 'string' },
+                formula: { type: 'string' },
+                involvedFields: {
+                  type: 'array',
+                  items: { type: 'string' }
+                },
+                reasoning: { type: 'string' },
+                outputType: { type: 'string', enum: ['number', 'string', 'boolean'] },
+                exampleResult: { type: 'string' }
+              },
+              required: ['id', 'type', 'description', 'formula', 'involvedFields', 'reasoning', 'outputType', 'exampleResult'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['relationships'],
+        additionalProperties: false
+      }
+    };
+
+    const response = await llmCaller.callWithJsonValidation<{ relationships: RelationshipDefinition[] }>(
+      [{ role: 'user', content: prompt }],
+      { structuredOutputSchema: schema_def }
+    );
+
+    const result = response.parsed.relationships;
+    
+    // Validate and return relationships
+    if (Array.isArray(result)) {
+      return result.map((rel: any) => ({
+        id: rel.id || `complex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'complex' as const,
+        description: rel.description || '',
+        formula: rel.formula || '',
+        involvedFields: rel.involvedFields || []
+      }));
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Error inferring complex relationships:', error);
+    throw new Error(`Failed to infer complex relationships: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+  
+  /* DEPRECATED CODE
   try {
     const prompt = await preparePrompt('relationship-inference-complex', {
       businessContext: schema.businessContext,

@@ -10,10 +10,15 @@ import type { SchemaDefinition, AnalyticsView } from '../types/schema';
 
 /**
  * Generates analytics views tailored to schema and relationships
+ * @deprecated Use AnalyticsConfigWizard component instead with AI generation
  */
 export async function generateAnalyticsViews(
   schema: SchemaDefinition
 ): Promise<AnalyticsView[]> {
+  console.warn('generateAnalyticsViews is deprecated. Use AnalyticsConfigWizard component with AI generation instead.');
+  return [];
+  
+  /* DEPRECATED CODE - Use AnalyticsConfigWizard instead
   try {
     const prompt = await preparePrompt('analytics-generation', {
       businessContext: schema.businessContext,
@@ -48,6 +53,7 @@ export async function generateAnalyticsViews(
     console.error('Error generating analytics views:', error);
     throw new Error(`Failed to generate analytics views: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+  */
 }
 
 /**

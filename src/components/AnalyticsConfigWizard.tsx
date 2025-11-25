@@ -211,23 +211,45 @@ export function AnalyticsConfigWizard({
 
       // Build context from schema
       const dimensionFields = activeSchema.fields.filter(f => 
-        f.dataType === 'dimension' || f.dataType === 'classification'
+        f.semanticRole === 'dimension' || f.semanticRole === 'classification'
       );
       const measureFields = activeSchema.fields.filter(f => 
-        f.dataType === 'metric' || f.dataType === 'measure'
+        f.semanticRole === 'metric'
       );
+      
+      // Get calculated fields from relationships
+      const calculatedFields = activeSchema.relationships?.filter(
+        (rel) => rel.type === 'complex' && rel.formula && rel.enableAnalytics === true
+      ).map(rel => ({
+        id: `calc_${rel.id}`,
+        displayName: rel.displayName || rel.id,
+        description: rel.description,
+        outputType: rel.outputType || 'number'
+      })) || [];
+
+      // Build existing views context if there are any
+      const existingViewsContext = views.length > 0 
+        ? `\n**Existing Analytics Views (DO NOT DUPLICATE):**
+${views.map(v => `- "${v.name}": ${v.description || 'No description'} [${v.chartType}, ${v.dimensionField || 'no dimension'}, ${v.measureField || 'count only'}, ${v.aggregation}]`).join('\n')}
+
+**IMPORTANT: Generate NEW views that are DIFFERENT from the existing ones above. Do NOT create duplicates or similar views.**
+` 
+        : '';
 
       const prompt = `You are an expert data analyst creating analytics views for a ${activeSchema.businessContext || 'business'} application.
 
 **Schema Context:**
 - Business Context: ${activeSchema.businessContext || 'Not specified'}
 - Schema Name: ${activeSchema.name}
+${existingViewsContext}
+**Available Dimension/Classification Fields (use the ID in parentheses):**
+${dimensionFields.map(f => `- ID: "${f.id}" - Display Name: "${f.displayName}"`).join('\n')}
 
-**Available Dimension/Classification Fields:**
-${dimensionFields.map(f => `- ${f.displayName} (${f.fieldName}): ${f.description || 'No description'}`).join('\n')}
-
-**Available Measure/Metric Fields:**
-${measureFields.map(f => `- ${f.displayName} (${f.fieldName}): ${f.description || 'No description'}`).join('\n')}
+**Available Measure/Metric Fields (use the ID in parentheses):**
+${measureFields.map(f => `- ID: "${f.id}" - Display Name: "${f.displayName}"`).join('\n')}
+${calculatedFields.length > 0 ? `
+**Available Calculated Fields (computed from formulas - use the ID in parentheses):**
+${calculatedFields.map(f => `- ID: "${f.id}" - Display Name: "${f.displayName}" - Description: ${f.description} [Type: ${f.outputType}]`).join('\n')}` : ''}
 
 **Task:**
 Generate 5-8 meaningful, business-relevant analytics views that would provide valuable insights for this use case. Each view should combine dimensions and measures appropriately.
@@ -236,40 +258,80 @@ For each view, specify:
 1. **name**: Clear, business-friendly name (e.g., "Agent Performance by Product")
 2. **description**: Brief explanation of what insights this view provides
 3. **chartType**: One of: "bar", "line", "pie", "area", "scatter"
-4. **dimensionField**: The field ID to use as dimension (x-axis or category) - must be from the dimension fields list above, or omit if count-only
-5. **measureField**: The field ID to use as measure (y-axis or value) - must be from the measure fields list above, or omit for count
+4. **dimensionField**: The exact field ID (not display name) from the dimension fields list above - MUST match exactly, or omit if count-only
+5. **measureField**: The exact field ID (not display name) from the measure or calculated fields list above - MUST match exactly, or omit for count
 6. **aggregation**: One of: "count", "sum", "average", "min", "max" (use "count" if no measureField)
+
+**CRITICAL: You MUST use the exact field ID values (the quoted strings after "ID:") for dimensionField and measureField. Do NOT use display names or make up field names.**
+
+**IMPORTANT: Calculated fields are especially valuable for analytics as they represent derived business metrics. Consider using them as measures in your views whenever appropriate.**
 
 **Important Guidelines:**
 - Choose chart types that match the data: bar for categories, line for trends, pie for proportions
 - Create a mix of different view types for comprehensive analysis
 - Use meaningful combinations that answer business questions
-- If using field IDs, use the exact fieldName values provided above
+- ALWAYS use the exact ID values provided above - copying them character-for-character
 - For count-only views (no measure), omit measureField and use aggregation: "count"
 
 Return ONLY a valid JSON array of analytics views.`;
 
       const response = await llmCaller.callWithJsonValidation<any>(
         [{ role: 'user', content: prompt }],
-        { temperature: 0.7, max_tokens: 3000 }
+        {}
       );
 
       // Handle both array and object responses
       const viewsArray = Array.isArray(response.parsed) ? response.parsed : (response.parsed.views || []);
+      
+      // Helper function to find field ID by matching display name or field name
+      const findFieldId = (fieldName: string | undefined, fieldList: any[], calculatedList: any[] = []): string | undefined => {
+        if (!fieldName) return undefined;
+        
+        // First try exact ID match
+        let match = fieldList.find(f => f.id === fieldName);
+        if (match) return match.id;
+        
+        // Try case-insensitive ID match
+        match = fieldList.find(f => f.id.toLowerCase() === fieldName.toLowerCase());
+        if (match) return match.id;
+        
+        // Try display name match
+        match = fieldList.find(f => f.displayName.toLowerCase() === fieldName.toLowerCase());
+        if (match) return match.id;
+        
+        // Try partial match in display name
+        match = fieldList.find(f => f.displayName.toLowerCase().includes(fieldName.toLowerCase()));
+        if (match) return match.id;
+        
+        // Also check calculated fields list
+        if (calculatedList.length > 0) {
+          match = calculatedList.find(f => f.id === fieldName);
+          if (match) return match.id;
+          
+          match = calculatedList.find(f => f.id.toLowerCase() === fieldName.toLowerCase());
+          if (match) return match.id;
+          
+          match = calculatedList.find(f => f.displayName.toLowerCase() === fieldName.toLowerCase());
+          if (match) return match.id;
+        }
+        
+        return undefined;
+      };
       
       const generatedViews: AnalyticsView[] = viewsArray.map((v: any, index: number) => ({
         id: `ai-view-${Date.now()}-${index}`,
         name: v.name,
         description: v.description || '',
         chartType: v.chartType || 'bar',
-        dimensionField: v.dimensionField || undefined,
-        measureField: v.measureField || undefined,
+        dimensionField: findFieldId(v.dimensionField, dimensionFields, calculatedFields),
+        measureField: findFieldId(v.measureField, measureFields, calculatedFields),
         aggregation: v.aggregation || 'count',
         enabled: true,
       }));
 
-      setViews(generatedViews);
-      toast.success(`✨ Generated ${generatedViews.length} analytics views with AI!`);
+      // Append new views to existing ones instead of replacing
+      setViews([...views, ...generatedViews]);
+      toast.success(`✨ Generated ${generatedViews.length} new analytics view(s)! Total: ${views.length + generatedViews.length}`);
     } catch (error) {
       console.error('AI generation error:', error);
       toast.error(`AI generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -303,6 +365,17 @@ Return ONLY a valid JSON array of analytics views.`;
   const metricFields = activeSchema?.fields.filter(
     (f) => f.semanticRole === 'metric' || f.type === 'number'
   ) || [];
+
+  // Get calculated fields from relationships that are enabled for analytics
+  const calculatedFields = activeSchema?.relationships?.filter(
+    (rel) => rel.type === 'complex' && rel.formula && rel.enableAnalytics === true
+  ).map(rel => ({
+    id: `calc_${rel.id}`,
+    displayName: rel.displayName || rel.id,
+    description: rel.description,
+    type: rel.outputType || 'number',
+    isCalculated: true
+  })) || [];
 
   const allFields = activeSchema?.fields || [];
 
@@ -526,12 +599,32 @@ Return ONLY a valid JSON array of analytics views.`;
                             {field.displayName}
                           </SelectItem>
                         ))}
+                        {calculatedFields.length > 0 && (
+                          <>
+                            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t mt-1">
+                              Calculated Fields
+                            </div>
+                            {calculatedFields.map((field) => (
+                              <SelectItem key={field.id} value={field.id}>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm">🧮</span>
+                                  <div>
+                                    <div>{field.displayName}</div>
+                                    <div className="text-xs text-muted-foreground">{field.description}</div>
+                                  </div>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
                       {metricFields.length > 0
-                        ? `${metricFields.length} metric fields available`
-                        : 'No metric fields in schema'}
+                        ? `${metricFields.length} metric fields${calculatedFields.length > 0 ? ` + ${calculatedFields.length} calculated` : ''} available`
+                        : calculatedFields.length > 0 
+                          ? `${calculatedFields.length} calculated fields available`
+                          : 'No metric fields in schema'}
                     </p>
                   </div>
                 </div>

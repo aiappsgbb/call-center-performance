@@ -21,23 +21,25 @@ Identify **simple correlative relationships** between fields where one field lik
 4. **Metric → Classification**: How measurements relate to categories
 
 ## Response Format
-Return a valid JSON array of relationship objects:
+Return a valid JSON object with a relationships array:
 
 ```json
-[
-  {
-    "id": "unique_relationship_id",
-    "type": "simple",
-    "description": "Clear natural language description of the relationship (e.g., 'Agent performance affects overall call score')",
-    "involvedFields": ["field_id_1", "field_id_2"],
-    "reasoning": "Brief explanation of why this relationship exists"
-  }
-]
+{
+  "relationships": [
+    {
+      "id": "unique_relationship_id",
+      "type": "simple",
+      "description": "Clear natural language description of the relationship (e.g., 'Agent performance affects overall call score')",
+      "involvedFields": ["field_id_1", "field_id_2"],
+      "reasoning": "Brief explanation of why this relationship exists"
+    }
+  ]
+}
 ```
 
 **Important:**
 - Focus on meaningful, business-relevant relationships
 - Each relationship should involve 1-3 fields
 - Descriptions should be actionable for analytics
-- Return empty array if no clear relationships found
+- Return `{"relationships": []}` if no clear relationships found
 - Do NOT create formulas or calculations (that's for complex relationships)

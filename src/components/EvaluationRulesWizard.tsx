@@ -389,7 +389,7 @@ Return a valid JSON array of evaluation rule objects. Each object must have:
       <DialogTrigger asChild>
         {trigger || (
           <Button variant="outline" size="sm">
-            <Sparkle className="mr-2" size={18} />
+            <Sparkle className="mr-2 animate-pulse" size={18} />
             Generate Rules
           </Button>
         )}
@@ -645,8 +645,17 @@ Return a valid JSON array of evaluation rule objects. Each object must have:
                 onClick={handleGenerateRules}
                 disabled={!activeSchema || !businessContext.trim() || generating}
               >
-                Generate Rules
-                <ArrowRight className="ml-2" size={16} />
+                {generating ? (
+                  <>
+                    <Sparkle className="mr-2 animate-spin" size={16} />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    Generate Rules
+                    <ArrowRight className="ml-2" size={16} />
+                  </>
+                )}
               </Button>
             )}
             {step === 'review' && (

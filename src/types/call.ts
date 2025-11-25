@@ -125,6 +125,24 @@ export interface BorrowerInsight {
   futureStrategy: string;
 }
 
+/**
+ * Topic classification insight for a call
+ */
+export interface TopicInsight {
+  topicId: string;                 // Reference to TopicDefinition.id
+  topicName: string;               // Topic name (denormalized for display)
+  confidence: number;              // 0-1 confidence score
+  sentiment: SentimentLabel;       // Sentiment for this topic in this call
+}
+
+/**
+ * Topics and key phrases extracted from call
+ */
+export interface TopicsAndPhrasesInsight {
+  topics: TopicInsight[];          // Multiple topics per call allowed
+  keyPhrases: string[];            // Important phrases from the conversation
+}
+
 export interface CallEvaluation {
   id: string;
   callId: string;
@@ -139,6 +157,7 @@ export interface CallEvaluation {
   nationalityInsight?: NationalityInsight;
   outcomeInsight?: OutcomeInsight;
   borrowerInsight?: BorrowerInsight;
+  topicsInsight?: TopicsAndPhrasesInsight;  // Topics and key phrases
 }
 
 export interface CallRecord {
@@ -160,7 +179,7 @@ export interface CallRecord {
   sentimentSegments?: CallSentimentSegment[];
   sentimentSummary?: string;
   overallSentiment?: SentimentLabel; // Overall sentiment for the entire call (for analytics)
-  status: 'uploaded' | 'processing' | 'transcribed' | 'evaluated' | 'failed';
+  status: 'pending audio' | 'uploaded' | 'processing' | 'transcribed' | 'evaluated' | 'failed';
   error?: string;
   createdAt: string;
   updatedAt: string;

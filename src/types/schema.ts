@@ -4,6 +4,19 @@
  */
 
 /**
+ * Topic definition for call categorization taxonomy
+ */
+export interface TopicDefinition {
+  id: string;                      // Unique topic identifier
+  name: string;                    // Topic name (e.g., "Billing Issues")
+  description: string;             // Description to help LLM classify
+  keywords?: string[];             // Optional keywords to improve matching
+  parentId?: string;               // Parent topic ID for hierarchy
+  children?: TopicDefinition[];    // Child topics (for nested display)
+  color?: string;                  // Optional color for visualization
+}
+
+/**
  * Semantic roles that fields can have in the schema
  */
 export type SemanticRole =
@@ -54,6 +67,13 @@ export interface RelationshipDefinition {
   description: string;             // Natural language explanation (e.g., "Agent performance affects score")
   formula?: string;                // JavaScript formula for complex relationships (e.g., "daysPastDue * dueAmount / 1000")
   involvedFields: string[];        // Field IDs involved in this relationship
+  
+  // Display and behavior properties
+  displayName?: string;            // Human-readable name for UI display (defaults to id if not provided)
+  displayInTable?: boolean;        // Show as virtual column in calls table (for complex relationships)
+  enableAnalytics?: boolean;       // Allow using calculated value as analytics measure/dimension
+  useInPrompt?: boolean;           // Include relationship context in AI evaluation prompts
+  outputType?: 'number' | 'string' | 'boolean';  // Expected output type for complex formulas
 }
 
 /**
@@ -67,8 +87,10 @@ export interface SchemaDefinition {
   updatedAt?: string;              // ISO timestamp of last update
   businessContext: string;         // User-provided description of use case
   excelFileName?: string;          // Original Excel file reference
+  audioFolderPath?: string;        // Schema-specific audio folder path (e.g., "/audio/debt-collection")
   fields: FieldDefinition[];       // Field definitions
   relationships: RelationshipDefinition[];  // Discovered relationships
+  topicTaxonomy?: TopicDefinition[];  // Hierarchical topic taxonomy for call classification
 }
 
 /**
@@ -95,12 +117,27 @@ export interface AnalyticsView {
   id: string;
   name: string;
   description: string;
-  chartType: 'bar' | 'line' | 'pie' | 'scatter' | 'trend';
+  chartType: 'bar' | 'line' | 'pie' | 'area' | 'scatter' | 'trend';
   dimensionField?: string;         // Field ID to group by
   measureField?: string;           // Field ID to measure
   aggregation?: 'count' | 'sum' | 'avg' | 'min' | 'max';
   filters?: Record<string, any>;
   enabled: boolean;
+}
+
+/**
+ * Get audio folder path for a schema
+ * Returns schema-specific subfolder path
+ */
+export function getSchemaAudioPath(schema: SchemaDefinition): string {
+  // If schema has custom audio path, use it
+  if (schema.audioFolderPath) {
+    return schema.audioFolderPath;
+  }
+  
+  // Generate path from schema ID: /audio/{schema-id}
+  const sanitizedId = schema.id.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+  return `/audio/${sanitizedId}`;
 }
 
 /**

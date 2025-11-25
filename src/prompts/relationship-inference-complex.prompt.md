@@ -42,26 +42,29 @@ return (metadata.value || 0) + (metadata.fee || 0) + (metadata.penalty || 0);
 ```
 
 ## Response Format
-Return a valid JSON array of complex relationship objects:
+Return a valid JSON object with a relationships array:
 
 ```json
-[
-  {
-    "id": "unique_relationship_id",
-    "type": "complex",
-    "description": "Natural language description of what this calculates (e.g., 'Risk score based on delinquency and amount')",
-    "formula": "return (metadata.daysPastDue * metadata.dueAmount) / 1000;",
-    "involvedFields": ["field_id_1", "field_id_2"],
-    "reasoning": "Explanation of business value and why this calculation matters",
-    "outputType": "number|string|boolean",
-    "exampleResult": "Example output value from sample data"
-  }
-]
+{
+  "relationships": [
+    {
+      "id": "unique_relationship_id",
+      "type": "complex",
+      "description": "Natural language description of what this calculates (e.g., 'Risk score based on delinquency and amount')",
+      "formula": "return (metadata.daysPastDue * metadata.dueAmount) / 1000;",
+      "involvedFields": ["field_id_1", "field_id_2"],
+      "reasoning": "Explanation of business value and why this calculation matters",
+      "outputType": "number",
+      "exampleResult": "Example output value from sample data"
+    }
+  ]
+}
 ```
 
 **Important:**
 - Only suggest formulas that make business sense
 - Formulas must be syntactically valid JavaScript
 - Include null/undefined handling in formulas
-- Return empty array if no calculable patterns found
+- Return `{"relationships": []}` if no calculable patterns found
 - Maximum 5 complex relationships to avoid overwhelming users
+- `outputType` must be one of: "number", "string", or "boolean"

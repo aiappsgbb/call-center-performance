@@ -131,7 +131,7 @@ export function DynamicDetailView({ metadata, schema, className = '' }: DynamicD
         </h4>
         <div className="grid grid-cols-2 gap-4">
           {fields.map((field) => {
-            const value = metadata[field.name];
+            const value = metadata[field.id];
             const formattedValue = formatFieldValue(value, field);
             const shouldHighlight = field.semanticRole === 'participant_1' || 
                                    field.semanticRole === 'participant_2' ||
@@ -205,7 +205,7 @@ export function DynamicDetailView({ metadata, schema, className = '' }: DynamicD
             </h4>
             <div className="space-y-4">
               {freeformFields.map((field) => {
-                const value = metadata[field.name];
+                const value = metadata[field.id];
                 const formattedValue = formatFieldValue(value, field);
 
                 return (

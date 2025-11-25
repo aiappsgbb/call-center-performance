@@ -91,7 +91,7 @@ export function csvRowsToCallRecords(
     const audioField = schema.fields.find(f => 
       f.id === 'audioUrl' || 
       f.id === 'fileTag' || 
-      f.columnMapping?.toString().toLowerCase().includes('file')
+      f.name?.toString().toLowerCase().includes('file')
     );
 
     if (audioField && audioFolderPath) {
@@ -184,6 +184,8 @@ export function csvRowsToCallRecordsLegacy(
 
     return {
       id: uuidv4(),
+      schemaId: 'legacy-default',
+      schemaVersion: '1.0.0',
       metadata,
       audioUrl,
       status: 'uploaded' as const,
@@ -249,7 +251,13 @@ export async function restoreAudioFilesFromStorage(calls: CallRecord[]): Promise
       }
 
       try {
-        const blob = await getAudioFile(call.id);
+        // Try with schema-aware key first, then fallback to just callId for backward compatibility
+        let blob = await getAudioFile(call.id, call.schemaId);
+        if (!blob && call.schemaId) {
+          // Fallback to non-schema key for backward compatibility
+          blob = await getAudioFile(call.id);
+        }
+        
         if (blob) {
           const fileName = call.audioUrl?.split('/').pop() || 'audio.mp3';
           const file = new File([blob], fileName, { type: blob.type });

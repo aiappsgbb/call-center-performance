@@ -3,6 +3,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -264,6 +265,9 @@ export function CallDetailDialog({
           <div className="flex items-start justify-between">
             <div>
               <DialogTitle className="text-2xl">Call Details</DialogTitle>
+              <DialogDescription className="sr-only">
+                View and manage call transcript, evaluation, and metadata
+              </DialogDescription>
               <div className="mt-2">
                 <DynamicDetailSummary metadata={call.metadata} schema={schema} />
               </div>
@@ -294,6 +298,66 @@ export function CallDetailDialog({
 
           <TabsContent value="metadata" className="space-y-4">
             <DynamicDetailView metadata={call.metadata} schema={schema} />
+            
+            {/* Calculated Metrics Section */}
+            {schema.relationships && schema.relationships.length > 0 && (() => {
+              const calculatedMetrics = schema.relationships
+                .filter(rel => rel.type === 'complex' && rel.formula)
+                .map(rel => ({
+                  relationship: rel,
+                  value: call.metadata[`calc_${rel.id}`]
+                }))
+                .filter(item => item.value !== undefined);
+              
+              if (calculatedMetrics.length === 0) return null;
+              
+              return (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <span className="text-lg">🧮</span>
+                      Calculated Metrics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {calculatedMetrics.map(({ relationship, value }) => (
+                      <div key={relationship.id} className="border-b border-border last:border-0 pb-3 last:pb-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm">
+                              {relationship.displayName || relationship.id}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {relationship.description}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono text-sm font-semibold">
+                              {typeof value === 'number' ? value.toFixed(2) : String(value)}
+                            </div>
+                            {relationship.outputType && (
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {relationship.outputType}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {relationship.formula && (
+                          <details className="mt-2">
+                            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                              Show formula
+                            </summary>
+                            <pre className="mt-2 text-xs bg-muted p-2 rounded overflow-x-auto">
+                              {relationship.formula}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="transcript">
@@ -349,11 +413,11 @@ export function CallDetailDialog({
                     phrases={call.transcriptPhrases}
                     agentName={(() => {
                       const agentField = schema.fields.find(f => f.semanticRole === 'participant_1');
-                      return agentField ? String(call.metadata[agentField.fieldName] || agentField.participantLabel || 'Agent') : 'Agent';
+                      return agentField ? String(call.metadata[agentField.id] || agentField.participantLabel || 'Agent') : 'Agent';
                     })()}
                     borrowerName={(() => {
                       const borrowerField = schema.fields.find(f => f.semanticRole === 'participant_2');
-                      return borrowerField ? String(call.metadata[borrowerField.fieldName] || borrowerField.participantLabel || 'Customer') : 'Customer';
+                      return borrowerField ? String(call.metadata[borrowerField.id] || borrowerField.participantLabel || 'Customer') : 'Customer';
                     })()}
                     locale={call.transcriptLocale}
                     duration={call.transcriptDuration}

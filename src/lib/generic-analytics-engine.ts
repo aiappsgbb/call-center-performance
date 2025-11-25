@@ -58,7 +58,7 @@ export class GenericAnalyticsEngine {
     calls.forEach(call => {
       if (!call.metadata) return;
 
-      const dimensionValue = call.metadata[view.dimensionField];
+      const dimensionValue = view.dimensionField ? call.metadata[view.dimensionField] : 'All';
       const key = String(dimensionValue ?? 'Unknown');
 
       if (!groups.has(key)) {
@@ -135,7 +135,7 @@ export class GenericAnalyticsEngine {
   ): TrendDataPoint[] {
     // Find timestamp field
     const timestampField = schema.fields.find(f => f.semanticRole === 'timestamp') 
-      || schema.fields.find(f => f.dataType === 'date');
+      || schema.fields.find(f => f.type === 'date');
 
     if (!timestampField) {
       console.warn('No timestamp field found for trend analysis');

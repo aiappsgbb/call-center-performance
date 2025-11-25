@@ -1,8 +1,9 @@
-import { CallMetadata, CallEvaluation, EvaluationResult, EvaluationCriterion, TranscriptPhrase, CallSentimentSegment, SentimentLabel, ProductInsight, RiskInsight, NationalityInsight, OutcomeInsight, BorrowerInsight, RiskTier, CategorizedOutcome, CallRecord } from '@/types/call';
-import { SchemaDefinition } from '@/types/schema';
+import { CallMetadata, CallEvaluation, EvaluationResult, EvaluationCriterion, TranscriptPhrase, CallSentimentSegment, SentimentLabel, ProductInsight, RiskInsight, NationalityInsight, OutcomeInsight, BorrowerInsight, RiskTier, CategorizedOutcome, CallRecord, TopicInsight, TopicsAndPhrasesInsight } from '@/types/call';
+import { SchemaDefinition, TopicDefinition } from '@/types/schema';
 import { EVALUATION_CRITERIA, getMaxScore } from '@/lib/evaluation-criteria';
 import type { AzureOpenAIConfig } from '@/configManager';
 import { LLMCaller, ChatMessage, LLMCallOptions } from '../llmCaller';
+import { preparePrompt } from '@/lib/prompt-loader';
 
 // Global rules cache - can be updated by UI
 let CUSTOM_EVALUATION_CRITERIA: EvaluationCriterion[] | null = null;
@@ -94,11 +95,11 @@ export class AzureOpenAIService {
   /**
    * Build evaluation prompt with criteria and insights generation (schema-aware)
    */
-  private buildEvaluationPrompt(
+  private async buildEvaluationPrompt(
     transcript: string, 
     metadata: Record<string, any>,
     schema: SchemaDefinition
-  ): string {
+  ): Promise<string> {
     const activeCriteria = getActiveEvaluationCriteria();
     const criteriaText = activeCriteria.map((criterion) => {
       return `${criterion.id}. ${criterion.name} [${criterion.type}]
@@ -123,105 +124,57 @@ export class AzureOpenAIService {
       ? `\n\nBUSINESS CONTEXT:\n${schema.businessContext}\n`
       : '';
 
-    return `You are an expert call center quality assurance evaluator for: ${schema.name}.
+    // Build topic taxonomy section if available
+    const topicTaxonomySection = this.buildTopicTaxonomySection(schema.topicTaxonomy);
 
-Analyze the following call transcript and evaluate it against the ${activeCriteria.length} quality criteria below. Additionally, generate detailed analytical insights for business intelligence.${businessContextSection}
-
-**IMPORTANT: You MUST provide ALL responses, insights, analysis, reasoning, feedback, and recommendations in ENGLISH language only, regardless of the language used in the transcript.**
-
-CALL METADATA:
-${metadataFields}
-
-TRANSCRIPT:
-${transcript}
-
-EVALUATION CRITERIA:
-${criteriaText}
-
-For each criterion, provide:
-1. criterionId (number 1-${activeCriteria.length})
-2. score (exactly 0, 5, or 10 based on the scoring standard)
-3. passed (true if score >= 10, false otherwise)
-4. evidence (exact quote from transcript if found, or "Not found" if missing)
-5. reasoning (brief explanation IN ENGLISH of why this score was given)
-
-Also provide an overallFeedback string (2-3 sentences IN ENGLISH) highlighting key strengths and areas for improvement.
-
-IMPORTANT: Additionally, generate detailed analytical insights IN ENGLISH based on the call metadata and transcript:
-
-1. PRODUCT INSIGHT (ALL IN ENGLISH, use markdown with **bold** for key points):
-   - Analyze how the product type (${metadata.product}) affects the call dynamics
-   - Identify 2-3 specific performance factors related to this product
-   - Recommend specific collection approach for this product type (use **bold** for critical action items)
-
-2. RISK INSIGHT (ALL IN ENGLISH, use markdown with **bold** for critical findings):
-   - Calculate risk tier based on Days Past Due: 0-30=Low, 31-60=Medium, 61-90=High, 90+=Critical
-   - Assign risk score (0-100) considering DPD (${metadata.daysPastDue}), amount ($${metadata.dueAmount}), sentiment, and evaluation performance
-   - Calculate payment probability percentage (0-100) based on all factors
-   - Determine if escalation is recommended (boolean)
-   - Provide detailed analysis IN ENGLISH explaining the risk assessment and payment likelihood (use **bold** for warnings or critical metrics)
-
-3. NATIONALITY INSIGHT (ALL IN ENGLISH, use markdown with **bold** for key recommendations):
-   - Identify 2-3 cultural factors affecting communication with ${metadata.nationality} customers
-   - Assess language effectiveness (rate agent's communication clarity and cultural awareness)
-   - Recommend specific adjustments IN ENGLISH for better engagement with this demographic (use **bold** for most important adjustments)
-
-4. OUTCOME INSIGHT (ALL IN ENGLISH, use markdown with **bold** for key factors):
-   - Categorize the follow-up status "${metadata.followUpStatus}" into one of: "success", "promise-to-pay", "refused", "no-contact", "callback-needed", or "other"
-   - Calculate success probability percentage (0-100) for positive resolution
-   - Identify 2-3 key factors that influenced this outcome
-   - Provide reasoning IN ENGLISH for the outcome classification and probability (use **bold** for most impactful factors)
-
-5. BORROWER INSIGHT (ALL IN ENGLISH, use markdown with **bold** for critical strategies):
-   - Rate interaction quality (excellent/good/fair/poor) based on borrower engagement and agent rapport
-   - Identify 2-3 relationship indicators (positive or negative signals about future interactions)
-   - Recommend future strategy IN ENGLISH for handling this borrower (use **bold** for highest priority actions)
-
-Return your evaluation and insights as a valid JSON object with this exact structure:
-{
-  "results": [
-    {
-      "criterionId": 1,
-      "score": 10,
-      "passed": true,
-      "evidence": "exact quote from transcript or description",
-      "reasoning": "brief explanation"
-    }
-  ],
-  "overallFeedback": "2-3 sentence summary",
-  "insights": {
-    "product": {
-      "productType": "${metadata.product}",
-      "performanceFactors": ["factor 1", "factor 2"],
-      "recommendedApproach": "detailed approach description"
-    },
-    "risk": {
-      "riskTier": "Low" | "Medium" | "High" | "Critical",
-      "riskScore": 0-100,
-      "paymentProbability": 0-100,
-      "escalationRecommended": true | false,
-      "detailedAnalysis": "comprehensive risk analysis with reasoning"
-    },
-    "nationality": {
-      "culturalFactors": ["factor 1", "factor 2"],
-      "languageEffectiveness": "assessment of communication effectiveness",
-      "recommendedAdjustments": "specific recommendations"
-    },
-    "outcome": {
-      "categorizedOutcome": "success" | "promise-to-pay" | "refused" | "no-contact" | "callback-needed" | "other",
-      "successProbability": 0-100,
-      "keyFactors": ["factor 1", "factor 2"],
-      "reasoning": "explanation for categorization"
-    },
-    "borrower": {
-      "interactionQuality": "excellent" | "good" | "fair" | "poor",
-      "relationshipIndicators": ["indicator 1", "indicator 2"],
-      "futureStrategy": "recommended approach for future calls"
-    }
+    return await preparePrompt('call-evaluation', {
+      schemaName: schema.name,
+      criteriaCount: activeCriteria.length.toString(),
+      businessContext: businessContextSection,
+      metadataFields,
+      transcript,
+      criteriaText,
+      topicTaxonomySection,
+      productType: metadata.product || 'N/A',
+      daysPastDue: metadata.daysPastDue || 'N/A',
+      dueAmount: metadata.dueAmount || 'N/A',
+      nationality: metadata.nationality || 'N/A',
+      followUpStatus: metadata.followUpStatus || 'N/A'
+    });
   }
-}
 
-Be thorough, fair, and specific in your evaluation. Quote exact phrases when possible. Provide detailed, actionable insights IN ENGLISH LANGUAGE ONLY for all five insight categories. All text fields (reasoning, evidence, feedback, analysis, recommendations, summaries) MUST be written in English.`;
+  /**
+   * Build topic taxonomy section for the evaluation prompt
+   */
+  private buildTopicTaxonomySection(topicTaxonomy?: TopicDefinition[]): string {
+    if (!topicTaxonomy || topicTaxonomy.length === 0) {
+      return '\n\nTOPIC TAXONOMY:\nNo topic taxonomy defined. Generate topics based on the conversation content.\n';
+    }
+
+    const formatTopic = (topic: TopicDefinition, level = 0): string => {
+      const indent = '  '.repeat(level);
+      const keywords = topic.keywords?.length ? ` (keywords: ${topic.keywords.join(', ')})` : '';
+      let result = `${indent}- ${topic.id}: ${topic.name}${keywords}\n`;
+      result += `${indent}  Description: ${topic.description}\n`;
+      
+      if (topic.children && topic.children.length > 0) {
+        for (const child of topic.children) {
+          result += formatTopic(child, level + 1);
+        }
+      }
+      
+      return result;
+    };
+
+    const topicsText = topicTaxonomy.map(t => formatTopic(t)).join('');
+
+    return `
+
+TOPIC TAXONOMY:
+Use the following predefined topics to classify this call. Match the call to one or more topics based on the conversation content. Use the topic IDs exactly as provided.
+
+${topicsText}
+`;
   }
 
   /**
@@ -256,7 +209,7 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
       },
       {
         role: 'user',
-        content: this.buildEvaluationPrompt(transcript, metadata, schema),
+        content: await this.buildEvaluationPrompt(transcript, metadata, schema),
       },
     ];
 
@@ -295,6 +248,15 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
             relationshipIndicators: string[];
             futureStrategy: string;
           };
+          topicsAndPhrases?: {
+            topics: Array<{
+              topicId: string;
+              topicName: string;
+              confidence: number;
+              sentiment: string;
+            }>;
+            keyPhrases: string[];
+          };
         };
       }>(messages, {
         useJsonMode: false, // Rely on prompt engineering, not JSON mode
@@ -332,6 +294,7 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
       let nationalityInsight: NationalityInsight | undefined;
       let outcomeInsight: OutcomeInsight | undefined;
       let borrowerInsight: BorrowerInsight | undefined;
+      let topicsInsight: TopicsAndPhrasesInsight | undefined;
 
       if (parsed.insights) {
         // Product insight
@@ -396,6 +359,31 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
           };
         }
 
+        // Topics and key phrases insight
+        if (parsed.insights.topicsAndPhrases) {
+          console.log('📋 Found topicsAndPhrases in response:', JSON.stringify(parsed.insights.topicsAndPhrases).slice(0, 200));
+          const validSentiments: SentimentLabel[] = ['positive', 'negative', 'neutral'];
+          topicsInsight = {
+            topics: Array.isArray(parsed.insights.topicsAndPhrases.topics)
+              ? parsed.insights.topicsAndPhrases.topics.map(t => ({
+                  topicId: t.topicId || '',
+                  topicName: t.topicName || '',
+                  confidence: Math.min(1, Math.max(0, t.confidence || 0)),
+                  sentiment: validSentiments.includes(t.sentiment as SentimentLabel)
+                    ? (t.sentiment as SentimentLabel)
+                    : 'neutral',
+                }))
+              : [],
+            keyPhrases: Array.isArray(parsed.insights.topicsAndPhrases.keyPhrases)
+              ? parsed.insights.topicsAndPhrases.keyPhrases.filter(Boolean)
+              : [],
+          };
+          console.log('✓ Parsed topicsInsight:', JSON.stringify(topicsInsight).slice(0, 200));
+        } else {
+          console.log('⚠ No topicsAndPhrases found in parsed.insights');
+          console.log('📊 Available insight keys:', Object.keys(parsed.insights || {}));
+        }
+
         console.log('✓ Insights generated successfully');
       } else {
         console.log('⚠ No insights generated in response');
@@ -415,9 +403,11 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
         nationalityInsight,
         outcomeInsight,
         borrowerInsight,
+        topicsInsight,
       };
 
       console.log(`✓ Evaluation complete: ${percentage}% (${totalScore}/${maxScore} points)`);
+      console.log(`📊 topicsInsight included: ${!!topicsInsight}, keyPhrases count: ${topicsInsight?.keyPhrases?.length || 0}`);
       
       return evaluation;
     } catch (error) {
@@ -463,11 +453,11 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
     return `${minutes}:${seconds}.${centiseconds}`;
   }
 
-  private buildSentimentPrompt(
+  private async buildSentimentPrompt(
     phrases: TranscriptPhrase[],
     locale: string,
     allowedSentiments: SentimentLabel[]
-  ): string {
+  ): Promise<string> {
     if (phrases.length === 0) {
       return 'No conversation available.';
     }
@@ -489,40 +479,14 @@ Be thorough, fair, and specific in your evaluation. Quote exact phrases when pos
       .join('\n');
 
     const omittedCount = phrases.length - trimmed.length;
-
     const omittedSuffix =
       omittedCount > 0 ? `\n...${omittedCount} additional lines omitted for brevity.` : '';
 
-    return `You are a senior contact-center sentiment analyst. Given the conversation below (language ${locale}), identify contiguous segments where sentiment is consistent. Use only the following discrete labels: ${allowedSentiments.join(
-      ', '
-    )}. Keep the number of segments reasonable (no more than 12).
-
-**IMPORTANT: All summary, rationale, and text fields MUST be written in ENGLISH language only.**
-
-Return strict JSON with the shape:
-{
-  "summary": "short overview highlighting key mood shifts",
-  "segments": [
-    {
-      "startMilliseconds": number,
-      "endMilliseconds": number,
-      "speaker": number | null,
-      "sentiment": "positive" | "neutral" | "negative",
-      "confidence": number (0-1),
-      "summary": "one sentence",
-      "rationale": "brief explanation"
-    }
-  ]
-}
-- start/end are inclusive-exclusive millisecond offsets.
-- Merge consecutive sentences with similar mood.
-- Do not overlap segments.
-- If unsure, use "neutral" with low confidence.
-- ALL text output (summary, rationale) MUST be in English.
-
-Conversation timeline:\n${timeline}${omittedSuffix}
-
-Analyze carefully and ensure the returned JSON is valid. Remember: ALL TEXT IN ENGLISH.`;
+    return await preparePrompt('sentiment-timeline-analysis', {
+      locale,
+      allowedSentiments: allowedSentiments.join(', '),
+      timeline: timeline + omittedSuffix
+    });
   }
 
   async analyzeSentimentTimeline(
@@ -552,7 +516,7 @@ Analyze carefully and ensure the returned JSON is valid. Remember: ALL TEXT IN E
       },
       {
         role: 'user',
-        content: this.buildSentimentPrompt(phrases, locale, allowedSentiments),
+        content: await this.buildSentimentPrompt(phrases, locale, allowedSentiments),
       },
     ];
 
@@ -693,22 +657,11 @@ Analyze carefully and ensure the returned JSON is valid. Remember: ALL TEXT IN E
       .map(field => `- ${field.displayName}: ${metadata[field.id] ?? 'N/A'}`)
       .join('\n');
 
-    const prompt = `You are an expert call center sentiment analyst for: ${schema.name}. Analyze the overall sentiment of this entire call conversation.
-
-**IMPORTANT: Your response must be in ENGLISH language only.**
-
-CALL METADATA:
-${metadataText}
-
-TRANSCRIPT:
-${transcript}
-
-Based on the complete conversation, classify the OVERALL sentiment of this call as one of:
-- positive: The call went well, customer was satisfied, issues resolved positively
-- neutral: The call was routine, professional, no strong emotions
-- negative: The call was tense, customer was unhappy, unresolved complaints
-
-Return ONLY a single word: positive, neutral, or negative`;
+    const prompt = await preparePrompt('overall-sentiment-analysis', {
+      schemaName: schema.name,
+      metadataText,
+      transcript
+    });
 
     try {
       const messages: ChatMessage[] = [
@@ -851,10 +804,17 @@ export const azureOpenAIService = new AzureOpenAIService();
  */
 export async function regenerateInsights(
   calls: CallRecord[],
+  schema: SchemaDefinition,
   mode: 'missing' | 'all',
   onProgress?: (current: number, total: number, callId: string) => void
 ): Promise<CallRecord[]> {
-  const results = await azureOpenAIService.regenerateInsights(calls, mode, onProgress);
+  // Transform calls to include schema
+  const callsWithSchema = calls.map((call) => ({
+    ...call,
+    schema,
+  }));
+
+  const results = await azureOpenAIService.regenerateInsights(callsWithSchema, mode, onProgress);
   
   // Merge results back into original calls array
   const updatedCalls = calls.map((call) => {

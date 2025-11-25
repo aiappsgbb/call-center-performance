@@ -242,19 +242,53 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       return;
     }
 
-    // Validation
+    // Validation - Check semantic roles assigned by AI
     const participant1Fields = editableFields.filter(f => f.semanticRole === 'participant_1');
     const participant2Fields = editableFields.filter(f => f.semanticRole === 'participant_2');
     const classificationFields = editableFields.filter(f => f.semanticRole === 'classification');
 
-    if (participant1Fields.length !== 1) {
-      toast.error('Schema must have exactly one Participant 1 field');
+    console.log('=== PARTICIPANT VALIDATION ===');
+    console.log('Participant 1 fields:', participant1Fields.length, participant1Fields.map(f => f.suggestedDisplayName));
+    console.log('Participant 2 fields:', participant2Fields.length, participant2Fields.map(f => f.suggestedDisplayName));
+    console.log('All fields with roles:', editableFields.map(f => ({ name: f.suggestedDisplayName, role: f.semanticRole })));
+
+    // Smart validation: Check if AI already assigned participant roles correctly
+    const hasValidParticipant1 = participant1Fields.length === 1;
+    const hasValidParticipant2 = participant2Fields.length === 1;
+
+    if (!hasValidParticipant1) {
+      toast.error(`Schema must have exactly one Participant 1 field. Found ${participant1Fields.length}. Please review the field roles in the table below.`);
       return;
     }
 
-    if (participant2Fields.length !== 1) {
-      toast.error('Schema must have exactly one Participant 2 field');
+    if (!hasValidParticipant2) {
+      toast.error(`Schema must have exactly one Participant 2 field. Found ${participant2Fields.length}. Please review the field roles in the table below.`);
       return;
+    }
+
+    // Check if user selected fields match AI assignments (if user made selections)
+    if (participant1Field && participant1Field !== '__generate__') {
+      const userSelectedP1 = editableFields.find(f => f.suggestedFieldId === participant1Field);
+      const aiAssignedP1 = participant1Fields[0];
+      
+      if (userSelectedP1 && userSelectedP1.suggestedFieldId !== aiAssignedP1.suggestedFieldId) {
+        toast.warning(
+          `Note: You selected "${userSelectedP1.suggestedDisplayName}" as Participant 1, but AI assigned this role to "${aiAssignedP1.suggestedDisplayName}". Using AI assignment. Please review the field roles in the table.`,
+          { duration: 6000 }
+        );
+      }
+    }
+
+    if (participant2Field && participant2Field !== '__generate__') {
+      const userSelectedP2 = editableFields.find(f => f.suggestedFieldId === participant2Field);
+      const aiAssignedP2 = participant2Fields[0];
+      
+      if (userSelectedP2 && userSelectedP2.suggestedFieldId !== aiAssignedP2.suggestedFieldId) {
+        toast.warning(
+          `Note: You selected "${userSelectedP2.suggestedDisplayName}" as Participant 2, but AI assigned this role to "${aiAssignedP2.suggestedDisplayName}". Using AI assignment. Please review the field roles in the table.`,
+          { duration: 6000 }
+        );
+      }
     }
 
     if (classificationFields.length === 0) {
@@ -268,14 +302,13 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       // Convert discovered fields to FieldDefinition format
       const fieldDefinitions: FieldDefinition[] = editableFields.map(df => ({
         id: df.suggestedFieldId,
-        name: df.suggestedFieldId,
+        name: df.columnName, // Use original Excel column name for matching
         displayName: df.suggestedDisplayName,
         type: df.inferredType,
         semanticRole: df.semanticRole,
         participantLabel: df.semanticRole === 'participant_1' ? participant1Label : 
                          df.semanticRole === 'participant_2' ? participant2Label : 
                          undefined,
-        columnMapping: df.columnName,
         required: df.required,
         showInTable: df.showInTable,
         useInPrompt: df.useInPrompt,
@@ -285,14 +318,18 @@ export function SchemaDiscoveryWizard({ open, onOpenChange, onSchemaCreated }: S
       }));
 
       // Create schema
+      const schemaId = `schema-${Date.now()}`;
+      const sanitizedId = schemaId.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+      
       const newSchema: SchemaDefinition = {
-        id: `schema-${Date.now()}`,
+        id: schemaId,
         name: schemaName,
         version: '1.0.0',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         businessContext: businessContext,
         excelFileName: file?.name,
+        audioFolderPath: `/audio/${sanitizedId}`,
         fields: fieldDefinitions,
         relationships: [],
       };
@@ -559,8 +596,12 @@ Provide only the business context description without any additional explanation
                       id="schema-name"
                       value={schemaName}
                       onChange={(e) => setSchemaName(e.target.value)}
-                      placeholder="My Schema"
+                      placeholder="e.g., Debt Collection - ACME Corp"
+                      className="font-medium"
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Give your schema a descriptive name to identify its use case, project, or client.
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -643,7 +684,7 @@ Provide only the business context description without any additional explanation
                     </div>
                   </div>
 
-                  {discoveryResult.analysisNotes && (
+                  {discoveryResult.analysisNotes && !discoveryResult.analysisNotes.includes('stub implementation') && (
                     <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-md">
                       <p className="text-sm text-blue-900 dark:text-blue-100">
                         <strong>AI Analysis:</strong> {discoveryResult.analysisNotes}
@@ -668,6 +709,11 @@ Provide only the business context description without any additional explanation
                       size="sm"
                       className="border-purple-500 text-purple-600 hover:bg-purple-50 hover:text-purple-700"
                       onClick={async () => {
+                        if (!participant1Field || !participant2Field || participant1Field === '__generate__' || participant2Field === '__generate__') {
+                          toast.error('Please select Participant 1 and Participant 2 fields before configuring with AI. All calls expect at least 2 participants.');
+                          return;
+                        }
+                        
                         setIsProcessing(true);
                         try {
                           const azureServicesConfig = loadAzureConfigFromCookie();
@@ -680,6 +726,10 @@ Provide only the business context description without any additional explanation
                           const configManager = new BrowserConfigManager(azureServicesConfig.openAI);
                           const llmCaller = new LLMCaller(configManager);
 
+                          // Find selected participant fields
+                          const p1FieldName = editableFields.find(f => f.suggestedFieldId === participant1Field)?.suggestedDisplayName || 'Participant 1';
+                          const p2FieldName = editableFields.find(f => f.suggestedFieldId === participant2Field)?.suggestedDisplayName || 'Participant 2';
+
                           // Prepare field list for context
                           const fieldList = editableFields.map(f => 
                             `- ${f.suggestedDisplayName} (${f.columnName}): current role=${f.semanticRole}, type=${f.inferredType}`
@@ -689,6 +739,12 @@ Provide only the business context description without any additional explanation
 
 Business Context:
 ${businessContext}
+
+IMPORTANT: The user has selected these participant fields:
+- Participant 1 (${participant1Label}): ${p1FieldName}
+- Participant 2 (${participant2Label}): ${p2FieldName}
+
+You MUST assign semanticRole="participant_1" to "${p1FieldName}" and semanticRole="participant_2" to "${p2FieldName}".
 
 Fields:
 ${fieldList}
@@ -803,12 +859,22 @@ Return JSON array:
                           setIsProcessing(false);
                         }
                       }}
-                      disabled={isProcessing || !businessContext.trim()}
+                      disabled={isProcessing || !businessContext.trim() || !participant1Field || !participant2Field || participant1Field === '__generate__' || participant2Field === '__generate__'}
+                      title={(!participant1Field || !participant2Field || participant1Field === '__generate__' || participant2Field === '__generate__') 
+                        ? 'Please select Participant 1 and Participant 2 fields first. All calls expect at least 2 participants.' 
+                        : !businessContext.trim() 
+                        ? 'Please provide business context first' 
+                        : 'Use AI to configure all field properties'}
                     >
-                      <Sparkle className="mr-2 h-4 w-4" />
+                      <Sparkle className={`mr-2 h-4 w-4 ${isProcessing ? 'animate-pulse' : 'animate-pulse'}`} />
                       Configure All Fields with AI
                     </Button>
                   </div>
+                  {(!participant1Field || !participant2Field || participant1Field === '__generate__' || participant2Field === '__generate__') && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                      ⚠️ Participant field mapping is mandatory. All calls expect at least 2 participants. Please select fields above before using AI configuration.
+                    </p>
+                  )}
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2 max-h-[350px] overflow-y-auto pr-2">

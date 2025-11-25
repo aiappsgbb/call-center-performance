@@ -24,10 +24,15 @@ export interface GeneratedInsights {
 
 /**
  * Generates custom insight types from schema definition
+ * @deprecated Not currently used - insights are generated via azure-openai service
  */
 export async function generateFromSchema(
   schema: SchemaDefinition
 ): Promise<GeneratedInsights> {
+  console.warn('generateFromSchema is deprecated');
+  return { insightCategories: [], recommendedUsage: '' };
+  
+  /* DEPRECATED CODE
   try {
     const prompt = await preparePrompt('insight-generation', {
       businessContext: schema.businessContext,
@@ -54,6 +59,7 @@ export async function generateFromSchema(
     console.error('Error generating insights:', error);
     throw new Error(`Failed to generate insight types: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+  */
 }
 
 /**

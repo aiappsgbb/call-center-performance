@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -22,10 +23,10 @@ import {
 } from '@/components/ui/select';
 import { FileArrowUp, Warning, CheckCircle, Info } from '@phosphor-icons/react';
 import { CallRecord } from '@/types/call';
-import { SchemaDefinition } from '@/types/schema';
+import { SchemaDefinition, getSchemaAudioPath } from '@/types/schema';
 import { parseCSV, readFileAsText, readExcelFile } from '@/lib/csv-parser';
 import { detectSchemaForRows } from '@/lib/csv-parser';
-import { getAllSchemas } from '@/services/schema-manager';
+import { getAllSchemas, saveSchema, generateSchemaId } from '@/services/schema-manager';
 import { SchemaMapper } from '@/services/schema-mapper';
 import { toast } from 'sonner';
 
@@ -41,6 +42,7 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
   const [audioFolderPath, setAudioFolderPath] = useState('/audio');
   const [isProcessing, setIsProcessing] = useState(false);
   const [sheetName, setSheetName] = useState('audio related info');
+  const [isAudioPathLocked, setIsAudioPathLocked] = useState(false);
   
   // Schema detection state
   const [availableSchemas, setAvailableSchemas] = useState<SchemaDefinition[]>([]);
@@ -49,13 +51,46 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
   const [matchScore, setMatchScore] = useState<number | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
   const [parsedRows, setParsedRows] = useState<any[] | null>(null);
+  
+  // Custom schema naming
+  const [saveAsNew, setSaveAsNew] = useState(false);
+  const [customSchemaName, setCustomSchemaName] = useState('');
 
-  // Load available schemas on mount
+  // Load available schemas on mount and when dialog opens
   useEffect(() => {
-    const schemas = getAllSchemas();
-    setAvailableSchemas(schemas);
-    setSelectedSchema(activeSchema);
-  }, [activeSchema]);
+    if (open) {
+      const schemas = getAllSchemas();
+      setAvailableSchemas(schemas);
+      setSelectedSchema(activeSchema);
+    }
+  }, [activeSchema, open]);
+
+  // Update audio path when schema changes
+  useEffect(() => {
+    if (selectedSchema && !isAudioPathLocked) {
+      const schemaPath = getSchemaAudioPath(selectedSchema);
+      setAudioFolderPath(schemaPath);
+    }
+  }, [selectedSchema, isAudioPathLocked]);
+
+  /**
+   * Creates a new schema variant from a base schema with a custom name
+   */
+  const createSchemaVariant = (baseSchema: SchemaDefinition, newName: string): SchemaDefinition => {
+    const newId = generateSchemaId(newName);
+    const sanitizedId = newId.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+    
+    return {
+      ...baseSchema,
+      id: newId,
+      name: newName,
+      version: '1.0.0',
+      createdAt: new Date().toISOString(),
+      updatedAt: undefined,
+      audioFolderPath: `/audio/${sanitizedId}`,
+      relationships: [], // Start with no relationships for new schema
+    };
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -89,6 +124,16 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
         rows = parseCSV(csvText);
       }
 
+      console.log('=== SCHEMA DETECTION ===');
+      console.log('File:', file.name);
+      console.log('Rows:', rows.length);
+      console.log('First row columns:', rows[0] ? Object.keys(rows[0]) : 'none');
+      console.log('Available schemas:', availableSchemas.length);
+      console.log('Schemas:', availableSchemas.map(s => ({ 
+        name: s.name, 
+        fields: s.fields.map(f => ({ name: f.name, displayName: f.displayName })) 
+      })));
+
       if (rows.length === 0) {
         toast.error('No data found in file');
         return;
@@ -96,23 +141,47 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
 
       setParsedRows(rows);
 
-      // Detect best matching schema
-      const schema = detectSchemaForRows(rows, availableSchemas);
+      // Try to detect best matching schema
+      const schema = detectSchemaForRows(rows, availableSchemas, 30); // Very low threshold for detection
 
-      if (schema) {
-        // Calculate match score separately
-        const score = SchemaMapper.calculateMatchScore(rows[0], schema) / 100; // Convert to 0-1 range
+      console.log('Detected schema:', schema?.name || 'none');
+      
+      // Show match scores for all schemas
+      console.log('Match scores for all schemas:');
+      const schemaScores = availableSchemas.map(s => {
+        const score = SchemaMapper.calculateMatchScore(rows[0], s);
+        console.log(`  ${s.name}: ${score}%`);
+        return { schema: s, score };
+      });
+
+      // Find best match even if below threshold
+      const bestMatch = schemaScores.reduce((best, current) => 
+        current.score > best.score ? current : best
+      , { schema: null as SchemaDefinition | null, score: 0 });
+
+      if (bestMatch.schema && bestMatch.score > 30) {
+        const score = bestMatch.score / 100;
         
-        setDetectedSchema(schema);
-        setSelectedSchema(schema);
+        console.log('Using best match:', bestMatch.schema.name, 'with score:', bestMatch.score);
+        
+        setDetectedSchema(bestMatch.schema);
+        setSelectedSchema(bestMatch.schema);
         setMatchScore(score);
 
-        toast.success(
-          `Schema detected: ${schema.name} (${Math.round(score * 100)}% match)`,
-          { duration: 4000 }
-        );
+        if (bestMatch.score >= 70) {
+          toast.success(
+            `Schema detected: ${bestMatch.schema.name} (${Math.round(bestMatch.score)}% match)`,
+            { duration: 4000 }
+          );
+        } else {
+          toast.warning(
+            `Schema detected: ${bestMatch.schema.name} (${Math.round(bestMatch.score)}% match - low confidence). Please verify the mapping.`,
+            { duration: 6000 }
+          );
+        }
       } else {
-        toast.warning('No matching schema found. Please select manually.');
+        console.log('No schema matched');
+        toast.warning('No matching schema found. Please select manually or create a new schema.');
         setDetectedSchema(null);
         setMatchScore(null);
       }
@@ -149,6 +218,38 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
     setIsProcessing(true);
 
     try {
+      // Handle schema creation if save-as-new is enabled
+      let targetSchema = selectedSchema;
+
+      if (saveAsNew && customSchemaName.trim()) {
+        // Validate uniqueness
+        const existing = availableSchemas.find(s => s.name === customSchemaName.trim());
+        if (existing) {
+          toast.error('Schema name already exists. Please choose a different name.');
+          setIsProcessing(false);
+          return;
+        }
+
+        // Validate name format
+        if (!/^[a-zA-Z0-9\s\-_]+$/.test(customSchemaName.trim())) {
+          toast.error('Schema name contains invalid characters. Use only letters, numbers, spaces, hyphens, and underscores.');
+          setIsProcessing(false);
+          return;
+        }
+
+        // Create new schema variant
+        targetSchema = createSchemaVariant(selectedSchema, customSchemaName.trim());
+        const result = saveSchema(targetSchema);
+
+        if (!result.success) {
+          toast.error(result.error || 'Failed to create new schema');
+          setIsProcessing(false);
+          return;
+        }
+
+        toast.success(`Created new schema: "${customSchemaName.trim()}"`, { duration: 3000 });
+      }
+
       // Use parsed rows if available, otherwise re-parse
       let rows = parsedRows;
       if (!rows) {
@@ -168,11 +269,11 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
       }
 
       console.log('=== IMPORT WITH SCHEMA ===');
-      console.log('Selected schema:', selectedSchema.name);
+      console.log('Target schema:', targetSchema.name);
       console.log('Total rows:', rows.length);
 
       // Find audio file field in schema
-      const audioUrlField = selectedSchema.fields.find(f => 
+      const audioUrlField = targetSchema.fields.find(f => 
         f.name.toLowerCase().includes('audiourl') || 
         f.name.toLowerCase().includes('audio_url') ||
         f.name.toLowerCase().includes('filetag') ||
@@ -180,9 +281,9 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
         f.name.toLowerCase().includes('file')
       );
 
-      // Convert rows to CallRecords using selected schema
+      // Convert rows to CallRecords using target schema
       const callRecords: CallRecord[] = rows.map((row, index) => {
-        const metadata = SchemaMapper.mapRow(row, selectedSchema);
+        const metadata = SchemaMapper.mapRow(row, targetSchema);
         
         // Extract audio filename from metadata and construct full URL
         let audioUrl: string | undefined;
@@ -195,11 +296,11 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
         
         return {
           id: `import-${Date.now()}-${index}`,
-          status: 'uploaded' as const,
+          status: 'pending audio' as const, // Status will change to 'uploaded' when audio files are attached
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          schemaId: selectedSchema.id,
-          schemaVersion: selectedSchema.version,
+          schemaId: targetSchema.id,
+          schemaVersion: targetSchema.version,
           metadata,
           audioUrl,
         };
@@ -231,6 +332,8 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
       setParsedRows(null);
       setDetectedSchema(null);
       setMatchScore(null);
+      setSaveAsNew(false);
+      setCustomSchemaName('');
     } catch (error) {
       console.error('Import error:', error);
       toast.error(error instanceof Error ? error.message : 'Failed to import file');
@@ -332,6 +435,47 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
             </div>
           )}
 
+          {/* Custom Schema Naming */}
+          {selectedSchema && (
+            <div className="space-y-3 border rounded-lg p-4 bg-muted/30">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="save-as-new"
+                  checked={saveAsNew}
+                  onCheckedChange={(checked) => {
+                    setSaveAsNew(checked as boolean);
+                    if (!checked) {
+                      setCustomSchemaName('');
+                    }
+                  }}
+                />
+                <Label 
+                  htmlFor="save-as-new"
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                >
+                  Save as new schema variant
+                </Label>
+              </div>
+              
+              {saveAsNew && (
+                <div className="space-y-2 pl-6">
+                  <Label htmlFor="custom-schema-name">Custom Schema Name</Label>
+                  <Input
+                    id="custom-schema-name"
+                    placeholder={`e.g., ${selectedSchema.name} - Custom`}
+                    value={customSchemaName}
+                    onChange={(e) => setCustomSchemaName(e.target.value)}
+                    className="font-medium"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Create a new schema based on <strong>{selectedSchema.name}</strong> with your custom name.
+                    This allows you to organize schemas by project, client, or use case.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {csvFile && (csvFile.name.endsWith('.xlsx') || csvFile.name.endsWith('.xls')) && (
             <div className="space-y-2">
               <Label htmlFor="sheet-name">Sheet Name</Label>
@@ -348,16 +492,32 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="audio-folder">Audio Folder Path</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="audio-folder">Audio Folder Path</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsAudioPathLocked(!isAudioPathLocked)}
+                className="h-6 px-2 text-xs"
+              >
+                {isAudioPathLocked ? '🔒 Locked' : '🔓 Auto'}
+              </Button>
+            </div>
             <Input
               id="audio-folder"
               value={audioFolderPath}
-              onChange={(e) => setAudioFolderPath(e.target.value)}
-              placeholder="C:\path\to\audio\files"
+              onChange={(e) => {
+                setAudioFolderPath(e.target.value);
+                setIsAudioPathLocked(true);
+              }}
+              placeholder="/audio/schema-name"
+              disabled={!isAudioPathLocked}
             />
             <p className="text-xs text-muted-foreground">
-              Provide an HTTP-accessible path (e.g., <code>/audio</code> or <code>http://localhost:8080</code>). Browsers{' '}
-              cannot fetch <code>C:\\</code> file paths directly.
+              {isAudioPathLocked 
+                ? 'Custom path locked. Click 🔒 to use automatic schema-based path.'
+                : `Auto-generated from schema: ${selectedSchema?.name || 'Select a schema'}. Click 🔓 to customize.`}
             </p>
           </div>
         </div>
@@ -368,7 +528,7 @@ export function ImportCSVDialog({ open, onOpenChange, onImport, activeSchema }: 
           </Button>
           <Button onClick={handleImport} disabled={!csvFile || isProcessing}>
             <FileArrowUp className="mr-2" size={18} />
-            {isProcessing ? 'Importing...' : 'Import Calls'}
+            {isProcessing ? 'Importing...' : 'Import Metadata'}
           </Button>
         </DialogFooter>
       </DialogContent>

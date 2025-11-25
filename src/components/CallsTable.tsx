@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PlayCircle, Microphone, CheckCircle } from '@phosphor-icons/react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 
 interface CallsTableProps {
   calls: CallRecord[];
@@ -39,10 +39,23 @@ export function CallsTable({
   onTranscribe,
   onEvaluate,
 }: CallsTableProps) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
   // Get visible columns from schema (fields marked as showInTable)
   const visibleFields = useMemo(() => {
     if (!schema) return [];
     return schema.fields.filter(field => field.showInTable);
+  }, [schema]);
+
+  // Get calculated fields from relationships (marked as displayInTable)
+  const calculatedFields = useMemo(() => {
+    if (!schema || !schema.relationships) return [];
+    return schema.relationships.filter(rel => 
+      rel.type === 'complex' && 
+      rel.formula && 
+      rel.displayInTable === true
+    );
   }, [schema]);
 
   const getStatusBadge = (status: CallRecord['status']) => {
@@ -50,7 +63,8 @@ export function CallsTable({
       variant: 'default' | 'secondary' | 'destructive' | 'outline';
       label: string;
     }> = {
-      uploaded: { variant: 'secondary', label: 'Uploaded' },
+      'pending audio': { variant: 'outline', label: 'Pending Audio' },
+      uploaded: { variant: 'secondary', label: 'Ready to Process' },
       processing: { variant: 'outline', label: 'Processing...' },
       transcribed: { variant: 'outline', label: 'Transcribed' },
       evaluated: { variant: 'default', label: 'Evaluated' },
@@ -92,6 +106,18 @@ export function CallsTable({
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>(
     { key: 'createdAt', direction: 'desc' }
   );
+
+  // Calculate pagination
+  const totalPages = Math.ceil(calls.length / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage;
+  const endIndex = startIndex + rowsPerPage;
+
+  // Reset to page 1 when calls change significantly
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(1);
+    }
+  }, [calls.length, currentPage, totalPages]);
 
   type SortKey = string;
 
@@ -160,9 +186,13 @@ export function CallsTable({
     return result;
   }, [calls, sortConfig]);
 
+  // Paginate the sorted calls
+  const paginatedCalls = sortedCalls.slice(startIndex, endIndex);
+
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <Table>
+    <div className="space-y-4">
+      <div className="border border-border rounded-lg overflow-hidden">
+        <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="w-12"></TableHead>
@@ -205,6 +235,24 @@ export function CallsTable({
               </TableHead>
             ))}
             
+            {/* Calculated field columns */}
+            {calculatedFields.map(rel => (
+              <TableHead key={`calc_${rel.id}`} className="cursor-pointer">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-1 text-left font-medium hover:text-primary"
+                  onClick={() => handleSort(`calc_${rel.id}`)}
+                  title={rel.description}
+                >
+                  <span className="mr-1">🧮</span>
+                  {rel.displayName || rel.id}
+                  <span className="text-xs text-muted-foreground">
+                    {getSortIndicator(`calc_${rel.id}`)}
+                  </span>
+                </button>
+              </TableHead>
+            ))}
+            
             {/* Date column */}
             <TableHead className="cursor-pointer">
               <button
@@ -220,7 +268,7 @@ export function CallsTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {sortedCalls.map((call) => {
+          {paginatedCalls.map((call) => {
             const canTranscribe = !!call.audioFile;
             const canEvaluate = !!call.transcript;
             const canProcess = canTranscribe || canEvaluate;
@@ -252,13 +300,31 @@ export function CallsTable({
               
               {/* Dynamic cells from schema */}
               {visibleFields.map((field, index) => {
-                const value = call.metadata[field.name];
+                const value = call.metadata[field.id];
                 const formattedValue = formatFieldValue(value, field);
                 
                 return (
                   <TableCell 
                     key={field.id}
                     className={index === 0 ? 'font-medium' : ''}
+                  >
+                    {formattedValue}
+                  </TableCell>
+                );
+              })}
+              
+              {/* Calculated field cells */}
+              {calculatedFields.map(rel => {
+                const value = call.metadata[`calc_${rel.id}`];
+                const formattedValue = value !== undefined && value !== null
+                  ? (typeof value === 'number' ? value.toFixed(2) : String(value))
+                  : '-';
+                
+                return (
+                  <TableCell 
+                    key={`calc_${rel.id}`}
+                    className="font-mono text-sm"
+                    title={rel.description}
                   >
                     {formattedValue}
                   </TableCell>
@@ -288,6 +354,77 @@ export function CallsTable({
           })}
         </TableBody>
       </Table>
+      </div>
+
+      {/* Pagination Controls */}
+      {calls.length > 0 && (
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              Showing {startIndex + 1} to {Math.min(endIndex, calls.length)} of {calls.length} entries
+            </span>
+          </div>
+          
+          <div className="flex items-center gap-6">
+            {/* Rows per page selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Rows per page:</span>
+              <select
+                value={rowsPerPage}
+                onChange={(e) => {
+                  setRowsPerPage(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="h-8 w-16 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            {/* Page navigation */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(1)}
+                disabled={currentPage === 1}
+              >
+                First
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(totalPages)}
+                disabled={currentPage === totalPages}
+              >
+                Last
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

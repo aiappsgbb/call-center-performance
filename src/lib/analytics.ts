@@ -1,4 +1,4 @@
-import { CallRecord, AgentPerformance, CriteriaAnalytics, SentimentLabel, RiskTier, CategorizedOutcome } from '@/types/call';
+import { CallRecord, AgentPerformance, CriteriaAnalytics, SentimentLabel, RiskTier, CategorizedOutcome, TopicInsight } from '@/types/call';
 import { getActiveEvaluationCriteria } from '@/services/azure-openai';
 import { getActiveSchema } from '@/services/schema-manager';
 
@@ -633,4 +633,288 @@ export function calculateSentimentOverview(calls: CallRecord[]): SentimentOvervi
     distribution,
     averageConfidence: Number((averageConfidence * 100).toFixed(1)) / 100,
   };
+}
+
+// ============================================================================
+// TOPICS AND KEY PHRASES ANALYTICS
+// ============================================================================
+
+export interface TopicAnalytics {
+  topicId: string;
+  topicName: string;
+  callCount: number;
+  avgConfidence: number;
+  sentimentDistribution: Record<SentimentLabel, number>;
+  dominantSentiment: SentimentLabel;
+  avgHandlingTimeMs: number;
+  avgScore: number;
+  trend: 'up' | 'down' | 'stable';
+}
+
+export interface KeyPhraseAnalytics {
+  phrase: string;
+  count: number;
+  frequency: number; // percentage of total calls
+  avgSentiment: SentimentLabel;
+  relatedTopics: string[];
+}
+
+export interface OverviewKPIs {
+  totalCalls: number;
+  evaluatedCalls: number;
+  avgScore: number;
+  avgHandlingTimeMs: number;
+  satisfiedPercentage: number; // Calls with positive sentiment
+  topTopics: TopicAnalytics[];
+  topKeyPhrases: KeyPhraseAnalytics[];
+  sentimentDistribution: Record<SentimentLabel, number>;
+}
+
+/**
+ * Aggregate topic analytics from call insights
+ */
+export function aggregateTopicAnalytics(calls: CallRecord[]): TopicAnalytics[] {
+  const callsWithTopics = calls.filter((c) => 
+    c.evaluation?.topicsInsight?.topics && c.evaluation.topicsInsight.topics.length > 0
+  );
+
+  if (callsWithTopics.length === 0) {
+    return [];
+  }
+
+  // Group calls by topic
+  const topicMap = new Map<string, {
+    topicName: string;
+    calls: CallRecord[];
+    confidences: number[];
+    sentiments: SentimentLabel[];
+    scores: number[];
+  }>();
+
+  callsWithTopics.forEach((call) => {
+    call.evaluation!.topicsInsight!.topics.forEach((topic) => {
+      const key = topic.topicId;
+      if (!topicMap.has(key)) {
+        topicMap.set(key, {
+          topicName: topic.topicName,
+          calls: [],
+          confidences: [],
+          sentiments: [],
+          scores: [],
+        });
+      }
+      const entry = topicMap.get(key)!;
+      entry.calls.push(call);
+      entry.confidences.push(topic.confidence);
+      entry.sentiments.push(topic.sentiment);
+      if (call.evaluation?.percentage) {
+        entry.scores.push(call.evaluation.percentage);
+      }
+    });
+  });
+
+  const analytics: TopicAnalytics[] = [];
+
+  topicMap.forEach((data, topicId) => {
+    const callCount = data.calls.length;
+    const avgConfidence = data.confidences.reduce((a, b) => a + b, 0) / data.confidences.length;
+
+    // Calculate sentiment distribution
+    const sentimentCounts: Record<SentimentLabel, number> = {
+      positive: 0,
+      neutral: 0,
+      negative: 0,
+    };
+    data.sentiments.forEach((s) => {
+      sentimentCounts[s]++;
+    });
+    const totalSentiments = data.sentiments.length;
+    const sentimentDistribution: Record<SentimentLabel, number> = {
+      positive: (sentimentCounts.positive / totalSentiments) * 100,
+      neutral: (sentimentCounts.neutral / totalSentiments) * 100,
+      negative: (sentimentCounts.negative / totalSentiments) * 100,
+    };
+
+    // Dominant sentiment
+    const dominantSentiment = (Object.entries(sentimentCounts)
+      .sort(([, a], [, b]) => b - a)[0][0]) as SentimentLabel;
+
+    // Calculate average handling time from call duration
+    const avgHandlingTimeMs = data.calls.reduce((sum, call) => {
+      // Try to get duration from metadata or calculate from segments
+      let duration = 0;
+      if (call.metadata.durationMs) {
+        duration = call.metadata.durationMs;
+      } else if (call.metadata.duration) {
+        duration = call.metadata.duration * 1000; // assume seconds
+      } else if (call.sentimentSegments && call.sentimentSegments.length > 0) {
+        const lastSegment = call.sentimentSegments[call.sentimentSegments.length - 1];
+        duration = lastSegment.endMilliseconds || 0;
+      }
+      return sum + duration;
+    }, 0) / callCount;
+
+    // Average score
+    const avgScore = data.scores.length > 0
+      ? data.scores.reduce((a, b) => a + b, 0) / data.scores.length
+      : 0;
+
+    // Calculate trend (simple: compare first half vs second half)
+    const halfPoint = Math.floor(data.calls.length / 2);
+    const firstHalfAvg = data.scores.slice(0, halfPoint).reduce((a, b) => a + b, 0) / Math.max(halfPoint, 1);
+    const secondHalfAvg = data.scores.slice(halfPoint).reduce((a, b) => a + b, 0) / Math.max(data.scores.length - halfPoint, 1);
+    let trend: 'up' | 'down' | 'stable' = 'stable';
+    if (secondHalfAvg > firstHalfAvg + 5) trend = 'up';
+    else if (secondHalfAvg < firstHalfAvg - 5) trend = 'down';
+
+    analytics.push({
+      topicId,
+      topicName: data.topicName,
+      callCount,
+      avgConfidence,
+      sentimentDistribution,
+      dominantSentiment,
+      avgHandlingTimeMs,
+      avgScore,
+      trend,
+    });
+  });
+
+  return analytics.sort((a, b) => b.callCount - a.callCount);
+}
+
+/**
+ * Aggregate key phrase analytics from call insights
+ */
+export function aggregateKeyPhraseAnalytics(calls: CallRecord[]): KeyPhraseAnalytics[] {
+  console.log(`🔍 aggregateKeyPhraseAnalytics: Processing ${calls.length} calls`);
+  
+  // Debug: Check which calls have topicsInsight
+  calls.forEach((c, i) => {
+    if (c.evaluation) {
+      console.log(`  Call ${i}: has evaluation=${!!c.evaluation}, topicsInsight=${!!c.evaluation.topicsInsight}, keyPhrases=${c.evaluation.topicsInsight?.keyPhrases?.length || 0}`);
+    }
+  });
+  
+  const callsWithPhrases = calls.filter((c) =>
+    c.evaluation?.topicsInsight?.keyPhrases && c.evaluation.topicsInsight.keyPhrases.length > 0
+  );
+
+  console.log(`📊 Found ${callsWithPhrases.length} calls with key phrases`);
+
+  if (callsWithPhrases.length === 0) {
+    return [];
+  }
+
+  // Count phrase occurrences and collect related data
+  const phraseMap = new Map<string, {
+    count: number;
+    sentiments: SentimentLabel[];
+    topicIds: Set<string>;
+  }>();
+
+  callsWithPhrases.forEach((call) => {
+    const phrases = call.evaluation!.topicsInsight!.keyPhrases;
+    const topics = call.evaluation!.topicsInsight!.topics || [];
+    const overallSentiment = call.overallSentiment || 'neutral';
+
+    phrases.forEach((phrase) => {
+      const normalized = phrase.toLowerCase().trim();
+      if (!phraseMap.has(normalized)) {
+        phraseMap.set(normalized, {
+          count: 0,
+          sentiments: [],
+          topicIds: new Set(),
+        });
+      }
+      const entry = phraseMap.get(normalized)!;
+      entry.count++;
+      entry.sentiments.push(overallSentiment);
+      topics.forEach((t) => entry.topicIds.add(t.topicName));
+    });
+  });
+
+  const totalCalls = callsWithPhrases.length;
+  const analytics: KeyPhraseAnalytics[] = [];
+
+  phraseMap.forEach((data, phrase) => {
+    // Calculate average sentiment
+    const sentimentCounts: Record<SentimentLabel, number> = {
+      positive: 0,
+      neutral: 0,
+      negative: 0,
+    };
+    data.sentiments.forEach((s) => sentimentCounts[s]++);
+    const avgSentiment = (Object.entries(sentimentCounts)
+      .sort(([, a], [, b]) => b - a)[0][0]) as SentimentLabel;
+
+    analytics.push({
+      phrase,
+      count: data.count,
+      frequency: (data.count / totalCalls) * 100,
+      avgSentiment,
+      relatedTopics: Array.from(data.topicIds).slice(0, 3),
+    });
+  });
+
+  return analytics.sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Calculate overview KPIs for the dashboard
+ */
+export function calculateOverviewKPIs(calls: CallRecord[]): OverviewKPIs {
+  const evaluatedCalls = calls.filter((c) => c.evaluation);
+  const totalCalls = calls.length;
+
+  // Average score
+  const avgScore = evaluatedCalls.length > 0
+    ? evaluatedCalls.reduce((sum, c) => sum + (c.evaluation?.percentage || 0), 0) / evaluatedCalls.length
+    : 0;
+
+  // Average handling time
+  const avgHandlingTimeMs = calls.reduce((sum, call) => {
+    let duration = 0;
+    if (call.metadata.durationMs) {
+      duration = call.metadata.durationMs;
+    } else if (call.metadata.duration) {
+      duration = call.metadata.duration * 1000;
+    } else if (call.sentimentSegments && call.sentimentSegments.length > 0) {
+      const lastSegment = call.sentimentSegments[call.sentimentSegments.length - 1];
+      duration = lastSegment.endMilliseconds || 0;
+    }
+    return sum + duration;
+  }, 0) / Math.max(totalCalls, 1);
+
+  // Satisfied percentage (calls with positive overall sentiment)
+  const sentimentOverview = calculateSentimentOverview(calls);
+  const satisfiedPercentage = sentimentOverview.distribution.positive;
+
+  // Top topics
+  const topTopics = aggregateTopicAnalytics(calls).slice(0, 10);
+
+  // Top key phrases
+  const topKeyPhrases = aggregateKeyPhraseAnalytics(calls).slice(0, 30);
+
+  return {
+    totalCalls,
+    evaluatedCalls: evaluatedCalls.length,
+    avgScore,
+    avgHandlingTimeMs,
+    satisfiedPercentage,
+    topTopics,
+    topKeyPhrases,
+    sentimentDistribution: sentimentOverview.distribution,
+  };
+}
+
+/**
+ * Format milliseconds to human-readable duration
+ */
+export function formatDuration(ms: number): string {
+  if (!ms || ms <= 0) return '0:00';
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }

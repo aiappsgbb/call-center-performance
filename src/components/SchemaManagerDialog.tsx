@@ -46,7 +46,7 @@ import {
   ArrowUp,
   ArrowDown,
 } from '@phosphor-icons/react';
-import { SchemaDefinition, FieldDefinition, RelationshipDefinition, SemanticRole, FieldType } from '@/types/schema';
+import { SchemaDefinition, FieldDefinition, RelationshipDefinition, SemanticRole, FieldType, TopicDefinition } from '@/types/schema';
 import {
   getAllSchemas,
   getSchemaById,
@@ -57,7 +57,12 @@ import {
   importSchema,
   bumpVersion,
 } from '@/services/schema-manager';
+import { inferAllRelationships } from '@/services/relationship-inference';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
+import { CallRecord } from '@/types/call';
 import { toast } from 'sonner';
+import { executeFormula } from '@/lib/formula-executor';
+import { TopicTaxonomyWizard } from '@/components/TopicTaxonomyWizard';
 
 interface SchemaManagerDialogProps {
   trigger?: React.ReactNode;
@@ -100,6 +105,7 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
   const [selectedSchemaId, setSelectedSchemaId] = useState<string | null>(null);
   const [selectedSchema, setSelectedSchema] = useState<SchemaDefinition | null>(null);
   const [activeTab, setActiveTab] = useState('library');
+  const [calls, setCalls] = useLocalStorage<CallRecord[]>('calls', []);
   
   // Field editor state
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
@@ -108,6 +114,7 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
   // Relationship editor state
   const [editingRelationship, setEditingRelationship] = useState<RelationshipDefinition | null>(null);
   const [isAddingRelationship, setIsAddingRelationship] = useState(false);
+  const [isDiscoveringRelationships, setIsDiscoveringRelationships] = useState(false);
   
   // Delete confirmation
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -215,6 +222,123 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
     }
   };
 
+  /**
+   * Recalculate formulas for all calls matching a schema
+   * Used when relationships are added after CSV import
+   */
+  const recalculateCallMetadata = (schema: SchemaDefinition, callsToUpdate: CallRecord[]) => {
+    const complexRelationships = schema.relationships.filter(
+      rel => rel.type === 'complex' && rel.formula
+    );
+
+    if (complexRelationships.length === 0) return callsToUpdate;
+
+    const updatedCalls = callsToUpdate.map(call => {
+      if (call.schemaId !== schema.id) return call;
+
+      const updatedMetadata = { ...call.metadata };
+
+      // Calculate each formula
+      for (const rel of complexRelationships) {
+        try {
+          const result = executeFormula(rel.formula!, updatedMetadata);
+          if (result.success) {
+            updatedMetadata[`calc_${rel.id}`] = result.result;
+          }
+        } catch (error) {
+          console.warn(`Failed to calculate formula for ${rel.id}:`, error);
+        }
+      }
+
+      return {
+        ...call,
+        metadata: updatedMetadata
+      };
+    });
+
+    return updatedCalls;
+  };
+
+  const handleDiscoverRelationships = async () => {
+    if (!selectedSchema) return;
+
+    setIsDiscoveringRelationships(true);
+    try {
+      // Filter calls that match this schema
+      const schemaCalls = calls.filter(
+        call => call.schemaId === selectedSchema.id
+      );
+
+      // Extract metadata samples (max 10)
+      const sampleData = schemaCalls
+        .slice(0, 10)
+        .map(call => call.metadata);
+
+      toast.info('Analyzing schema fields...', { duration: 2000 });
+
+      // Discover relationships
+      const { all: discoveredRelationships } = await inferAllRelationships(
+        selectedSchema,
+        sampleData.length > 0 ? sampleData : undefined
+      );
+
+      if (discoveredRelationships.length === 0) {
+        toast.info('No new relationships discovered');
+        return;
+      }
+
+      // Filter out relationships that already exist
+      const existingIds = new Set(selectedSchema.relationships.map(r => r.id));
+      const existingDescriptions = new Set(
+        selectedSchema.relationships.map(r => r.description.toLowerCase())
+      );
+
+      const newRelationships = discoveredRelationships.filter(
+        rel => !existingIds.has(rel.id) && 
+               !existingDescriptions.has(rel.description.toLowerCase())
+      );
+
+      if (newRelationships.length === 0) {
+        toast.info('All discovered relationships already exist');
+        return;
+      }
+
+      // Add new relationships to schema
+      const updatedSchema = {
+        ...selectedSchema,
+        relationships: [...selectedSchema.relationships, ...newRelationships],
+        updatedAt: new Date().toISOString(),
+      };
+
+      saveSchema(updatedSchema);
+      setSelectedSchema(updatedSchema);
+      loadSchemas();
+
+      // Recalculate formulas for existing calls
+      const complexRelationships = newRelationships.filter(
+        rel => rel.type === 'complex' && rel.formula
+      );
+
+      if (complexRelationships.length > 0 && schemaCalls.length > 0) {
+        toast.info('Recalculating formulas for existing calls...', { duration: 2000 });
+        const updatedCalls = recalculateCallMetadata(updatedSchema, calls);
+        setCalls(updatedCalls);
+      }
+
+      toast.success(
+        `Discovered ${newRelationships.length} new relationship${newRelationships.length > 1 ? 's' : ''}!`,
+        { duration: 3000 }
+      );
+    } catch (error) {
+      console.error('Error discovering relationships:', error);
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to discover relationships'
+      );
+    } finally {
+      setIsDiscoveringRelationships(false);
+    }
+  };
+
   const handleImportSchema = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -247,6 +371,25 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
       toast.success(`Version bumped to ${newSchema.version}`);
     } catch (error) {
       toast.error('Failed to bump version');
+      console.error(error);
+    }
+  };
+
+  const handleSaveTopics = (topics: TopicDefinition[]) => {
+    if (!selectedSchema) return;
+
+    try {
+      const updatedSchema = {
+        ...selectedSchema,
+        topicTaxonomy: topics,
+        updatedAt: new Date().toISOString(),
+      };
+      saveSchema(updatedSchema);
+      setSelectedSchema(updatedSchema);
+      loadSchemas();
+      toast.success('Topic taxonomy saved successfully');
+    } catch (error) {
+      toast.error('Failed to save topics');
       console.error(error);
     }
   };
@@ -284,6 +427,9 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
 
     try {
       let updatedRelationships: RelationshipDefinition[];
+      const isNew = isAddingRelationship;
+      const isComplexWithFormula = relationship.type === 'complex' && relationship.formula;
+      
       if (isAddingRelationship) {
         updatedRelationships = [...selectedSchema.relationships, relationship];
       } else {
@@ -300,7 +446,18 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
       loadSchemas();
       setEditingRelationship(null);
       setIsAddingRelationship(false);
-      toast.success(isAddingRelationship ? 'Relationship added successfully' : 'Relationship updated successfully');
+
+      // Recalculate formulas for existing calls if this is a complex relationship
+      if (isComplexWithFormula) {
+        const schemaCalls = calls.filter(call => call.schemaId === selectedSchema.id);
+        if (schemaCalls.length > 0) {
+          toast.info('Recalculating formulas for existing calls...', { duration: 1500 });
+          const updatedCalls = recalculateCallMetadata(updatedSchema, calls);
+          setCalls(updatedCalls);
+        }
+      }
+
+      toast.success(isNew ? 'Relationship added successfully' : 'Relationship updated successfully');
     } catch (error) {
       toast.error('Failed to save relationship');
       console.error(error);
@@ -333,7 +490,7 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
     <>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-        <DialogContent className="!max-w-[50vw] w-[50vw] max-h-[90vh]">
+        <DialogContent className="!max-w-[70vw] w-[70vw] max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Database className="h-5 w-5" />
@@ -345,10 +502,11 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="library">Library</TabsTrigger>
               <TabsTrigger value="fields" disabled={!selectedSchema}>Fields</TabsTrigger>
               <TabsTrigger value="relationships" disabled={!selectedSchema}>Relationships</TabsTrigger>
+              <TabsTrigger value="topics" disabled={!selectedSchema}>Topics</TabsTrigger>
               <TabsTrigger value="versioning" disabled={!selectedSchema}>Versioning</TabsTrigger>
               <TabsTrigger value="export">Export/Import</TabsTrigger>
             </TabsList>
@@ -543,21 +701,41 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
                     <p className="text-sm text-muted-foreground">
                       {selectedSchema.relationships.length} relationship(s) in {selectedSchema.name}
                     </p>
-                    <Button
-                      onClick={() => {
-                        setIsAddingRelationship(true);
-                        setEditingRelationship({
-                          id: `rel_${Date.now()}`,
-                          type: 'simple',
-                          description: '',
-                          involvedFields: [],
-                        });
-                      }}
-                      size="sm"
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Relationship
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleDiscoverRelationships}
+                        size="sm"
+                        variant="outline"
+                        disabled={isDiscoveringRelationships}
+                      >
+                        {isDiscoveringRelationships ? (
+                          <>
+                            <span className="mr-2 h-4 w-4 animate-spin">✨</span>
+                            Discovering...
+                          </>
+                        ) : (
+                          <>
+                            <span className="mr-2 animate-pulse">✨</span>
+                            Discover with AI
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setIsAddingRelationship(true);
+                          setEditingRelationship({
+                            id: `rel_${Date.now()}`,
+                            type: 'simple',
+                            description: '',
+                            involvedFields: [],
+                          });
+                        }}
+                        size="sm"
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Relationship
+                      </Button>
+                    </div>
                   </div>
 
                   <ScrollArea className="h-[400px] pr-4">
@@ -613,6 +791,16 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
                     </div>
                   </ScrollArea>
                 </>
+              )}
+            </TabsContent>
+
+            {/* Topics Tab */}
+            <TabsContent value="topics" className="space-y-4">
+              {selectedSchema && (
+                <TopicTaxonomyWizard
+                  schema={selectedSchema}
+                  onSave={handleSaveTopics}
+                />
               )}
             </TabsContent>
 
@@ -965,20 +1153,115 @@ function RelationshipEditorDialog({ relationship, schema, isNew, onSave, onCance
             />
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="displayName">Display Name (Optional)</Label>
+            <Input
+              id="displayName"
+              value={formData.displayName || ''}
+              onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+              placeholder="Human-readable name for this relationship"
+            />
+            <p className="text-xs text-muted-foreground">
+              If not provided, the relationship ID will be used
+            </p>
+          </div>
+
           {formData.type === 'complex' && (
-            <div className="space-y-2">
-              <Label htmlFor="formula">Formula</Label>
-              <Input
-                id="formula"
-                value={formData.formula || ''}
-                onChange={(e) => setFormData({ ...formData, formula: e.target.value })}
-                placeholder="e.g., daysPastDue * dueAmount / 1000"
-                className="font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                Use field names as variables. Only Math operations are allowed.
-              </p>
-            </div>
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="formula">Formula</Label>
+                <Input
+                  id="formula"
+                  value={formData.formula || ''}
+                  onChange={(e) => setFormData({ ...formData, formula: e.target.value })}
+                  placeholder="e.g., daysPastDue * dueAmount / 1000"
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use field names as variables. Only Math operations are allowed.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="outputType">Output Type</Label>
+                <Select
+                  value={formData.outputType || 'number'}
+                  onValueChange={(value: 'number' | 'string' | 'boolean') => 
+                    setFormData({ ...formData, outputType: value })
+                  }
+                >
+                  <SelectTrigger id="outputType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="number">Number</SelectItem>
+                    <SelectItem value="string">String</SelectItem>
+                    <SelectItem value="boolean">Boolean</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Expected data type of the calculated result
+                </p>
+              </div>
+
+              <div className="space-y-3 border-t pt-3">
+                <Label className="text-sm font-semibold">Display & Usage Options</Label>
+                
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="displayInTable" className="text-sm font-normal">
+                      Display in Table
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Show as a column in the calls table
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="displayInTable"
+                    checked={formData.displayInTable || false}
+                    onChange={(e) => setFormData({ ...formData, displayInTable: e.target.checked })}
+                    className="h-4 w-4 rounded"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="enableAnalytics" className="text-sm font-normal">
+                      Enable for Analytics
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Available as a measure in custom analytics
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="enableAnalytics"
+                    checked={formData.enableAnalytics || false}
+                    onChange={(e) => setFormData({ ...formData, enableAnalytics: e.target.checked })}
+                    className="h-4 w-4 rounded"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="useInPrompt" className="text-sm font-normal">
+                      Use in AI Prompts
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Include calculated value in AI analysis
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="useInPrompt"
+                    checked={formData.useInPrompt || false}
+                    onChange={(e) => setFormData({ ...formData, useInPrompt: e.target.checked })}
+                    className="h-4 w-4 rounded"
+                  />
+                </div>
+              </div>
+            </>
           )}
 
           <div className="space-y-2">

@@ -9,6 +9,14 @@ const DB_VERSION = 1;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
+/**
+ * Generate storage key with schema context
+ * Format: {schemaId}/{callId} or just {callId} for backward compatibility
+ */
+function getStorageKey(callId: string, schemaId?: string): string {
+  return schemaId ? `${schemaId}/${callId}` : callId;
+}
+
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
@@ -31,13 +39,17 @@ function openDB(): Promise<IDBDatabase> {
 
 /**
  * Store audio file in IndexedDB
+ * @param callId - Unique call identifier
+ * @param file - Audio file blob
+ * @param schemaId - Optional schema ID for organization
  */
-export async function storeAudioFile(callId: string, file: File | Blob): Promise<void> {
+export async function storeAudioFile(callId: string, file: File | Blob, schemaId?: string): Promise<void> {
   const db = await openDB();
+  const storageKey = getStorageKey(callId, schemaId);
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.put(file, callId);
+    const request = store.put(file, storageKey);
 
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
@@ -46,13 +58,16 @@ export async function storeAudioFile(callId: string, file: File | Blob): Promise
 
 /**
  * Retrieve audio file from IndexedDB
+ * @param callId - Unique call identifier
+ * @param schemaId - Optional schema ID for organization
  */
-export async function getAudioFile(callId: string): Promise<Blob | null> {
+export async function getAudioFile(callId: string, schemaId?: string): Promise<Blob | null> {
   const db = await openDB();
+  const storageKey = getStorageKey(callId, schemaId);
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], 'readonly');
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.get(callId);
+    const request = store.get(storageKey);
 
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
@@ -61,13 +76,16 @@ export async function getAudioFile(callId: string): Promise<Blob | null> {
 
 /**
  * Delete audio file from IndexedDB
+ * @param callId - Unique call identifier
+ * @param schemaId - Optional schema ID for organization
  */
-export async function deleteAudioFile(callId: string): Promise<void> {
+export async function deleteAudioFile(callId: string, schemaId?: string): Promise<void> {
   const db = await openDB();
+  const storageKey = getStorageKey(callId, schemaId);
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(callId);
+    const request = store.delete(storageKey);
 
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
@@ -91,21 +109,24 @@ export async function clearAllAudioFiles(): Promise<void> {
 
 /**
  * Store audio files for multiple calls
+ * @param calls - Array of calls with audio files
+ * @param schemaId - Optional schema ID for organization
  */
-export async function storeAudioFiles(calls: Array<{ id: string; audioFile?: File | Blob }>): Promise<void> {
+export async function storeAudioFiles(calls: Array<{ id: string; audioFile?: File | Blob; schemaId?: string }>): Promise<void> {
   const promises = calls
     .filter(call => call.audioFile)
-    .map(call => storeAudioFile(call.id, call.audioFile!));
+    .map(call => storeAudioFile(call.id, call.audioFile!, call.schemaId));
   
   await Promise.all(promises);
 }
 
 /**
  * Restore audio files for multiple calls
+ * @param calls - Array of calls with optional schemaId
  */
-export async function restoreAudioFiles(calls: Array<{ id: string }>): Promise<Map<string, Blob>> {
+export async function restoreAudioFiles(calls: Array<{ id: string; schemaId?: string }>): Promise<Map<string, Blob>> {
   const promises = calls.map(async (call) => {
-    const blob = await getAudioFile(call.id);
+    const blob = await getAudioFile(call.id, call.schemaId);
     return { id: call.id, blob };
   });
 
