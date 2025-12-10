@@ -215,6 +215,15 @@ export function SyntheticMetadataWizard({
       ? `\nBATCH CONTEXT: This is batch ${batchIndex + 1} of ${totalBatches}. Ensure variety - generate different scenarios from other batches.\n`
       : '';
 
+    // Build date range constraint for the LLM
+    const dateRangeConstraint = dateRangeEnabled
+      ? `\nDATE RANGE CONSTRAINT:
+For ALL date/timestamp fields in the records, generate random dates between ${dateFrom} and ${dateTo}.
+Distribute dates evenly across this range - each record should have a different date.
+Use ISO format: YYYY-MM-DD for date fields, or full ISO timestamp YYYY-MM-DDTHH:MM:SS for datetime fields.
+`
+      : '';
+
     return `You are a data generation assistant. Generate ${batchRecordCount} realistic and diverse synthetic metadata records for a ${schema.name} schema.
 
 SCHEMA NAME: ${schema.name}
@@ -224,7 +233,7 @@ ${schema.businessContext || 'General business data'}
 
 FIELDS TO GENERATE:
 ${fieldDescriptions}
-${participantConstraints}
+${participantConstraints}${dateRangeConstraint}
 ${existingDataSample.length > 0 ? `
 EXISTING DATA SAMPLE (for reference style and patterns):
 ${JSON.stringify(existingDataSample, null, 2)}
@@ -240,7 +249,7 @@ GENERATION REQUIREMENTS:
 5. Make the data realistic and varied based on the business context
 6. If additional user instructions are provided, follow them precisely
 7. Ensure diversity across records (different values, scenarios)
-8. For date fields, use ISO format (YYYY-MM-DD)
+8. For date fields: ${dateRangeEnabled ? `MUST use dates between ${dateFrom} and ${dateTo} - distribute randomly across this range` : 'use ISO format (YYYY-MM-DD)'}
 9. For number fields, provide numeric values (not strings)
 10. For boolean fields, use true/false
 ${participant1Field || participant2Field ? `11. IMPORTANT: Respect participant limits - reuse names to stay within the max unique count specified` : ''}
@@ -420,12 +429,32 @@ Example structure:
       return;
     }
 
-    const now = new Date().toISOString();
+    // Helper function to generate random date within range
+    const generateRandomDate = (): string => {
+      if (!dateRangeEnabled) {
+        return new Date().toISOString();
+      }
+      const from = new Date(dateFrom);
+      const to = new Date(dateTo);
+      // Set time to random hour of the day for more realism
+      from.setHours(0, 0, 0, 0);
+      to.setHours(23, 59, 59, 999);
+      
+      const fromTime = from.getTime();
+      const toTime = to.getTime();
+      const randomTime = fromTime + Math.random() * (toTime - fromTime);
+      
+      return new Date(randomTime).toISOString();
+    };
+
     const newCallRecords: CallRecord[] = selectedRecords.map(r => {
       // Determine status based on whether transcription was generated
       const hasTranscript = r.transcript && r.transcript.trim().length > 0;
       const hasPhrases = r.transcriptPhrases && r.transcriptPhrases.length > 0;
       const status = hasTranscript ? 'transcribed' : 'pending audio';
+      
+      // Generate random date for this record
+      const recordDate = generateRandomDate();
       
       return {
         id: r.id,
@@ -443,8 +472,8 @@ Example structure:
         sentimentSegments: r.sentimentSegments,
         overallSentiment: r.overallSentiment,
         status: status as CallRecord['status'],
-        createdAt: now,
-        updatedAt: now,
+        createdAt: recordDate,
+        updatedAt: recordDate,
       };
     });
 
@@ -566,6 +595,63 @@ Example structure:
                 <p className="text-xs text-muted-foreground">
                   Maximum: 50 records per generation
                 </p>
+              </div>
+
+              {/* Date Range Selection */}
+              <Separator />
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <Label className="text-base font-medium flex items-center gap-2">
+                      <Calendar size={18} />
+                      Date Range for Records
+                    </Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Generate records with random dates within a specified range
+                    </p>
+                  </div>
+                  <Switch
+                    checked={dateRangeEnabled}
+                    onCheckedChange={setDateRangeEnabled}
+                  />
+                </div>
+                
+                {dateRangeEnabled && (
+                  <div className="grid grid-cols-2 gap-4 pl-1">
+                    <div className="space-y-2">
+                      <Label htmlFor="dateFrom" className="text-sm">From Date</Label>
+                      <Input
+                        id="dateFrom"
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        max={dateTo}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dateTo" className="text-sm">To Date</Label>
+                      <Input
+                        id="dateTo"
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        min={dateFrom}
+                        max={new Date().toISOString().split('T')[0]}
+                        className="w-full"
+                      />
+                    </div>
+                    <p className="col-span-2 text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                      💡 Records will be assigned random dates and times within this range for realistic distribution.
+                    </p>
+                  </div>
+                )}
+                
+                {!dateRangeEnabled && (
+                  <p className="text-xs text-muted-foreground">
+                    All records will use the current date/time when disabled.
+                  </p>
+                )}
               </div>
 
               {/* Participant Occurrence Limits */}

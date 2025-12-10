@@ -373,10 +373,9 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
   };
 
   const handleSelectAll = () => {
-    const transcribableCalls = (calls || []).filter(
-      (call) => call.status === 'uploaded' && call.audioFile,
-    );
-    setSelectedCallIds(new Set(transcribableCalls.map((c) => c.id)));
+    // Select all calls in the current filtered view
+    const allCallIds = (filteredCalls || []).map((c) => c.id);
+    setSelectedCallIds(new Set(allCallIds));
   };
 
   const handleDeselectAll = () => {
@@ -479,7 +478,7 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
               </Button>
             </>
           )}
-          {selectedCallIds.size === 0 && (calls || []).some(c => c.status === 'uploaded' && c.audioFile) && (
+          {selectedCallIds.size === 0 && (calls || []).length > 0 && (
             <Button onClick={handleSelectAll} variant="outline">
               Select All
             </Button>
