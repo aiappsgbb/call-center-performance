@@ -175,12 +175,12 @@ export function ConfigDialog() {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <GearSix className="mr-2" size={18} />
-          Azure Services
+          Configuration
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Azure Services Configuration</DialogTitle>
+          <DialogTitle>Configuration</DialogTitle>
           <DialogDescription>
             Configure Azure OpenAI and Azure Speech services for call transcription and
             evaluation.

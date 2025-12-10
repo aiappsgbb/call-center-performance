@@ -421,29 +421,40 @@ export function calculateAgentPerformance(calls: CallRecord[]): AgentPerformance
 
   const performances: AgentPerformance[] = [];
   const activeCriteria = getActiveEvaluationCriteria();
+  
+  // Calculate team average for comparison
+  const allEvaluatedCalls = calls.filter(c => c.evaluation);
+  const teamAvgPercentage = allEvaluatedCalls.length > 0
+    ? allEvaluatedCalls.reduce((sum, c) => sum + (c.evaluation?.percentage || 0), 0) / allEvaluatedCalls.length
+    : 0;
 
   agentMap.forEach((agentCalls, agentName) => {
     const totalCalls = agentCalls.length;
+    const scores = agentCalls.map(c => c.evaluation?.percentage || 0);
     const totalScore = agentCalls.reduce(
       (sum, call) => sum + (call.evaluation?.totalScore || 0),
       0
     );
-    const totalPercentage = agentCalls.reduce(
-      (sum, call) => sum + (call.evaluation?.percentage || 0),
-      0
-    );
+    const totalPercentage = scores.reduce((sum, s) => sum + s, 0);
+    const averagePercentage = totalPercentage / totalCalls;
 
+    // Criteria scores
     const criteriaScores: Record<number, number> = {};
+    let totalCriteriaPassed = 0;
+    let totalCriteriaEvaluated = 0;
+    
     activeCriteria.forEach((criterion) => {
-      const scores = agentCalls
-        .map((call) => {
-          const result = call.evaluation?.results.find(
-            (r) => r.criterionId === criterion.id
-          );
-          return result?.score || 0;
-        });
-      criteriaScores[criterion.id] =
-        scores.reduce((sum, s) => sum + s, 0) / scores.length;
+      const results = agentCalls
+        .map((call) => call.evaluation?.results.find((r) => r.criterionId === criterion.id))
+        .filter(r => r !== undefined);
+      
+      const avgScore = results.length > 0
+        ? results.reduce((sum, r) => sum + (r?.score || 0), 0) / results.length
+        : 0;
+      criteriaScores[criterion.id] = avgScore;
+      
+      totalCriteriaPassed += results.filter(r => r?.passed).length;
+      totalCriteriaEvaluated += results.length;
     });
 
     const sortedCriteria = Object.entries(criteriaScores).sort(
@@ -452,6 +463,7 @@ export function calculateAgentPerformance(calls: CallRecord[]): AgentPerformance
     const topStrengths = sortedCriteria.slice(0, 3).map(([id]) => parseInt(id));
     const topWeaknesses = sortedCriteria.slice(-3).map(([id]) => parseInt(id));
 
+    // Sentiment analysis
     const sentimentTotals: Record<SentimentLabel, number> = {
       positive: 0,
       neutral: 0,
@@ -478,6 +490,7 @@ export function calculateAgentPerformance(calls: CallRecord[]): AgentPerformance
       dominantSentiment = (Object.entries(sentimentTotals).sort(([, a], [, b]) => b - a)[0][0] as SentimentLabel);
     }
 
+    // Trend calculation
     const recentCalls = agentCalls.slice(-5);
     const olderCalls = agentCalls.slice(0, -5);
     const recentAvg =
@@ -493,21 +506,176 @@ export function calculateAgentPerformance(calls: CallRecord[]): AgentPerformance
     if (recentAvg > olderAvg + 5) trend = 'up';
     else if (recentAvg < olderAvg - 5) trend = 'down';
 
+    // === ENHANCED METRICS ===
+    
+    // Call duration metrics
+    let totalCallDuration = 0;
+    agentCalls.forEach(call => {
+      let duration = 0;
+      if (call.metadata?.durationMs) {
+        duration = call.metadata.durationMs;
+      } else if (call.metadata?.duration) {
+        duration = call.metadata.duration * 1000;
+      } else if (call.transcriptDuration) {
+        duration = call.transcriptDuration;
+      } else if (call.sentimentSegments && call.sentimentSegments.length > 0) {
+        const lastSegment = call.sentimentSegments[call.sentimentSegments.length - 1];
+        duration = lastSegment.endMilliseconds || 0;
+      }
+      totalCallDuration += duration;
+    });
+    const avgCallDuration = totalCalls > 0 ? totalCallDuration / totalCalls : 0;
+    
+    // Pass rate
+    const passRate = totalCriteriaEvaluated > 0 
+      ? (totalCriteriaPassed / totalCriteriaEvaluated) * 100 
+      : 0;
+    
+    // Perfect score calls (>= 95%)
+    const perfectScoreCalls = agentCalls.filter(c => (c.evaluation?.percentage || 0) >= 95).length;
+    
+    // Failed calls (< 60%)
+    const failedCalls = agentCalls.filter(c => (c.evaluation?.percentage || 0) < 60).length;
+    
+    // Topic performance
+    const topicMap = new Map<string, { count: number; totalScore: number }>();
+    agentCalls.forEach(call => {
+      call.evaluation?.topicsInsight?.topics?.forEach(topic => {
+        const existing = topicMap.get(topic.topicName) || { count: 0, totalScore: 0 };
+        existing.count++;
+        existing.totalScore += call.evaluation?.percentage || 0;
+        topicMap.set(topic.topicName, existing);
+      });
+    });
+    const topTopics = Array.from(topicMap.entries())
+      .map(([topic, data]) => ({
+        topic,
+        count: data.count,
+        avgScore: data.totalScore / data.count,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    
+    // AI Insights aggregation from schemaInsights
+    const insightSummary: Record<string, {
+      categoryName: string;
+      avgNumericValue?: number;
+      mostCommonValue?: string;
+      distribution?: Record<string, number>;
+    }> = {};
+    
+    agentCalls.forEach(call => {
+      const schemaInsights = call.evaluation?.schemaInsights;
+      if (schemaInsights) {
+        Object.entries(schemaInsights).forEach(([categoryId, insights]) => {
+          if (!insightSummary[categoryId]) {
+            insightSummary[categoryId] = {
+              categoryName: categoryId.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              distribution: {},
+            };
+          }
+          
+          // Aggregate numeric and categorical values
+          Object.entries(insights).forEach(([fieldId, value]) => {
+            if (typeof value === 'number') {
+              if (insightSummary[categoryId].avgNumericValue === undefined) {
+                insightSummary[categoryId].avgNumericValue = 0;
+              }
+              insightSummary[categoryId].avgNumericValue! += value / totalCalls;
+            } else if (typeof value === 'string') {
+              const dist = insightSummary[categoryId].distribution!;
+              dist[value] = (dist[value] || 0) + 1;
+            }
+          });
+        });
+      }
+    });
+    
+    // Find most common value for each insight
+    Object.values(insightSummary).forEach(summary => {
+      if (summary.distribution && Object.keys(summary.distribution).length > 0) {
+        const sorted = Object.entries(summary.distribution).sort((a, b) => b[1] - a[1]);
+        summary.mostCommonValue = sorted[0][0];
+      }
+    });
+    
+    // Performance by period (weekly)
+    const periodMap = new Map<string, { totalScore: number; count: number }>();
+    agentCalls.forEach(call => {
+      const date = new Date(call.createdAt);
+      const weekStart = new Date(date);
+      weekStart.setDate(date.getDate() - date.getDay());
+      const periodKey = weekStart.toISOString().split('T')[0];
+      
+      const existing = periodMap.get(periodKey) || { totalScore: 0, count: 0 };
+      existing.totalScore += call.evaluation?.percentage || 0;
+      existing.count++;
+      periodMap.set(periodKey, existing);
+    });
+    const performanceByPeriod = Array.from(periodMap.entries())
+      .map(([period, data]) => ({
+        period,
+        avgScore: data.totalScore / data.count,
+        callCount: data.count,
+      }))
+      .sort((a, b) => a.period.localeCompare(b.period))
+      .slice(-8); // Last 8 weeks
+    
+    // Score consistency (standard deviation)
+    const mean = averagePercentage;
+    const squaredDiffs = scores.map(s => Math.pow(s - mean, 2));
+    const avgSquaredDiff = squaredDiffs.reduce((a, b) => a + b, 0) / scores.length;
+    const scoreStdDev = Math.sqrt(avgSquaredDiff);
+    
+    let consistencyRating: 'consistent' | 'variable' | 'inconsistent' = 'consistent';
+    if (scoreStdDev > 20) consistencyRating = 'inconsistent';
+    else if (scoreStdDev > 10) consistencyRating = 'variable';
+    
+    // Recent calls summary
+    const recentCallsSummary = agentCalls
+      .slice(-5)
+      .map(c => ({
+        callId: c.id,
+        score: c.evaluation?.percentage || 0,
+        date: c.createdAt,
+      }))
+      .reverse();
+
     performances.push({
       agentName,
       totalCalls,
       averageScore: totalScore / totalCalls,
-      averagePercentage: totalPercentage / totalCalls,
+      averagePercentage,
       criteriaScores,
       trend,
       topStrengths,
       topWeaknesses,
       sentimentDistribution,
       dominantSentiment,
+      // Enhanced metrics
+      avgCallDuration,
+      totalCallDuration,
+      passRate,
+      perfectScoreCalls,
+      failedCalls,
+      topTopics,
+      insightSummary: Object.keys(insightSummary).length > 0 ? insightSummary : undefined,
+      performanceByPeriod,
+      scoreStdDev,
+      consistencyRating,
+      recentCalls: recentCallsSummary,
+      aboveAverage: averagePercentage > teamAvgPercentage,
     });
   });
 
-  return performances.sort((a, b) => b.averagePercentage - a.averagePercentage);
+  // Sort by performance and add rankings
+  const sorted = performances.sort((a, b) => b.averagePercentage - a.averagePercentage);
+  sorted.forEach((perf, index) => {
+    perf.rankAmongAgents = index + 1;
+    perf.percentileRank = Math.round(((sorted.length - index) / sorted.length) * 100);
+  });
+  
+  return sorted;
 }
 
 export function calculateCriteriaAnalytics(calls: CallRecord[]): CriteriaAnalytics[] {
@@ -809,27 +977,23 @@ export function aggregateKeyPhraseAnalytics(calls: CallRecord[]): KeyPhraseAnaly
   // Count phrase occurrences and collect related data
   const phraseMap = new Map<string, {
     count: number;
-    sentiments: SentimentLabel[];
     topicIds: Set<string>;
   }>();
 
   callsWithPhrases.forEach((call) => {
     const phrases = call.evaluation!.topicsInsight!.keyPhrases;
     const topics = call.evaluation!.topicsInsight!.topics || [];
-    const overallSentiment = call.overallSentiment || 'neutral';
 
     phrases.forEach((phrase) => {
       const normalized = phrase.toLowerCase().trim();
       if (!phraseMap.has(normalized)) {
         phraseMap.set(normalized, {
           count: 0,
-          sentiments: [],
           topicIds: new Set(),
         });
       }
       const entry = phraseMap.get(normalized)!;
       entry.count++;
-      entry.sentiments.push(overallSentiment);
       topics.forEach((t) => entry.topicIds.add(t.topicName));
     });
   });
@@ -838,26 +1002,72 @@ export function aggregateKeyPhraseAnalytics(calls: CallRecord[]): KeyPhraseAnaly
   const analytics: KeyPhraseAnalytics[] = [];
 
   phraseMap.forEach((data, phrase) => {
-    // Calculate average sentiment
-    const sentimentCounts: Record<SentimentLabel, number> = {
-      positive: 0,
-      neutral: 0,
-      negative: 0,
-    };
-    data.sentiments.forEach((s) => sentimentCounts[s]++);
-    const avgSentiment = (Object.entries(sentimentCounts)
-      .sort(([, a], [, b]) => b - a)[0][0]) as SentimentLabel;
+    // Determine sentiment based on phrase content (keyword-based analysis)
+    const phraseSentiment = analyzePhraseSentiment(phrase);
 
     analytics.push({
       phrase,
       count: data.count,
       frequency: (data.count / totalCalls) * 100,
-      avgSentiment,
+      avgSentiment: phraseSentiment,
       relatedTopics: Array.from(data.topicIds).slice(0, 3),
     });
   });
 
   return analytics.sort((a, b) => b.count - a.count);
+}
+
+/**
+ * Analyze the sentiment of a phrase based on its content
+ * Uses keyword-based analysis to determine if a phrase is positive, negative, or neutral
+ */
+function analyzePhraseSentiment(phrase: string): SentimentLabel {
+  const lowerPhrase = phrase.toLowerCase();
+  
+  // Negative indicators - complaints, problems, issues
+  const negativeKeywords = [
+    'complaint', 'dispute', 'problem', 'issue', 'error', 'wrong', 'incorrect',
+    'missed', 'missing', 'lost', 'delay', 'delayed', 'late', 'cancel', 'cancelled',
+    'refund', 'reimbursement', 'compensation', 'escalate', 'escalation', 'supervisor',
+    'manager', 'frustrated', 'angry', 'upset', 'dissatisfied', 'unhappy', 'terrible',
+    'awful', 'horrible', 'worst', 'fail', 'failed', 'failure', 'broken', 'damage',
+    'damaged', 'overcharge', 'overcharged', 'billing error', 'unauthorized',
+    'no-show', 'didn\'t arrive', 'not received', 'never received', 'still waiting',
+    'churn', 'leaving', 'switching', 'competitor', 'disconnect', 'disconnection',
+    'past due', 'overdue', 'delinquent', 'collection', 'debt', 'owe', 'owed',
+    'denied', 'rejected', 'refused', 'unable', 'cannot', 'won\'t', 'can\'t',
+    'emergency', 'urgent', 'critical', 'severe', 'serious'
+  ];
+  
+  // Positive indicators - resolution, satisfaction, success
+  const positiveKeywords = [
+    'resolved', 'resolution', 'fixed', 'solved', 'solution', 'thank', 'thanks',
+    'appreciate', 'appreciated', 'great', 'excellent', 'wonderful', 'amazing',
+    'satisfied', 'happy', 'pleased', 'helpful', 'professional', 'efficient',
+    'quick', 'fast', 'prompt', 'confirmation', 'confirmed', 'approved', 'success',
+    'successful', 'complete', 'completed', 'processed', 'upgraded', 'bonus',
+    'discount', 'savings', 'reward', 'loyalty', 'gold status', 'priority',
+    'premium', 'vip', 'special offer', 'promotion', 'free', 'waived',
+    'retained', 'retention', 'renewed', 'renewal', 'payment plan', 'arrangement',
+    'accommodation', 'voucher', 'credit', 'miles', 'points'
+  ];
+  
+  // Check for negative keywords first (they often override positive context)
+  for (const keyword of negativeKeywords) {
+    if (lowerPhrase.includes(keyword)) {
+      return 'negative';
+    }
+  }
+  
+  // Check for positive keywords
+  for (const keyword of positiveKeywords) {
+    if (lowerPhrase.includes(keyword)) {
+      return 'positive';
+    }
+  }
+  
+  // Default to neutral
+  return 'neutral';
 }
 
 /**

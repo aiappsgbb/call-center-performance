@@ -267,7 +267,13 @@ export function InsightCategoriesManager({ schema, onSave }: InsightCategoriesMa
       const llmCaller = new LLMCaller(configManager);
 
       const existingCategoriesContext = categories.length > 0
-        ? `\n\n**Existing Categories (DO NOT DUPLICATE):**\n${categories.map(c => `- ${c.name}: ${c.description}`).join('\n')}`
+        ? `\n\n**⚠️ EXISTING CATEGORIES - DO NOT DUPLICATE OR RECREATE THESE:**\n${categories.map(c => `- "${c.name}" (id: ${c.id}): ${c.description}`).join('\n')}\n\n**IMPORTANT:** The categories listed above already exist. You MUST NOT generate any category that:
+1. Has the same or similar name (e.g., if "Customer Satisfaction" exists, don't create "Satisfaction Analysis" or "Customer Experience")
+2. Has the same id
+3. Covers the same analytical purpose or topic
+4. Would be redundant with existing analysis
+
+Only generate NEW, DIFFERENT categories that complement the existing ones.`
         : '';
 
       const prompt = `You are a call center analytics expert. Based on the schema context below, generate AI insight categories that would provide valuable analysis for call evaluations.
@@ -283,7 +289,7 @@ ${(schema.topicTaxonomy || []).slice(0, 10).map(t => `- ${t.name}: ${t.descripti
 ${existingCategoriesContext}
 
 **Requirements:**
-Generate 4-6 insight categories that provide meaningful analysis specific to this business context.
+Generate ${categories.length > 0 ? '2-4 NEW' : '4-6'} insight categories that provide meaningful analysis specific to this business context.${categories.length > 0 ? ' These must be DIFFERENT from the existing categories listed above.' : ''}
 
 Each insight category should have:
 1. **id**: Unique kebab-case identifier
@@ -344,9 +350,42 @@ Return ONLY a valid JSON array of InsightCategoryConfig objects.`;
         outputFields: cat.outputFields || [],
       }));
 
-      // Merge with existing, avoiding duplicates
-      const existingIds = new Set(categories.map(c => c.id));
-      const newCategories = validatedCategories.filter(c => !existingIds.has(c.id));
+      // Merge with existing, avoiding duplicates by ID and similar names
+      const existingIds = new Set(categories.map(c => c.id.toLowerCase()));
+      const existingNames = new Set(categories.map(c => c.name.toLowerCase()));
+      
+      // Helper to check if a name is too similar to existing ones
+      const isSimilarName = (newName: string): boolean => {
+        const normalizedNew = newName.toLowerCase().replace(/[^a-z0-9]/g, '');
+        for (const existingName of categories.map(c => c.name)) {
+          const normalizedExisting = existingName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          // Check for substring match or high overlap
+          if (normalizedNew.includes(normalizedExisting) || 
+              normalizedExisting.includes(normalizedNew) ||
+              normalizedNew === normalizedExisting) {
+            return true;
+          }
+          // Check for common words overlap (more than 50% shared words)
+          const newWords = new Set(newName.toLowerCase().split(/\s+/));
+          const existingWords = new Set(existingName.toLowerCase().split(/\s+/));
+          const intersection = [...newWords].filter(w => existingWords.has(w) && w.length > 2);
+          if (intersection.length >= Math.min(newWords.size, existingWords.size) * 0.5) {
+            return true;
+          }
+        }
+        return false;
+      };
+      
+      const newCategories = validatedCategories.filter(c => 
+        !existingIds.has(c.id.toLowerCase()) && 
+        !existingNames.has(c.name.toLowerCase()) &&
+        !isSimilarName(c.name)
+      );
+      
+      if (newCategories.length === 0 && validatedCategories.length > 0) {
+        toast.warning('All generated categories were duplicates of existing ones. Try regenerating for different categories.');
+        return;
+      }
       
       setCategories(prev => [...prev, ...newCategories]);
       toast.success(`✨ Generated ${newCategories.length} new insight categories!`);

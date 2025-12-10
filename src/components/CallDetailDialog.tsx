@@ -479,8 +479,19 @@ export function CallDetailDialog({
                   {call.evaluation.results.map((result) => {
                     // Get criteria for this call's schema
                     const schemaCriteria = getEvaluationCriteriaForSchema(schema.id);
-                    const criterion = schemaCriteria.find(c => c.id === result.criterionId);
-                    if (!criterion) return null;
+                    
+                    // The AI returns criterionId as 1-based sequential numbers (1, 2, 3...)
+                    // but the actual IDs in storage are like "rule_1765352460817_0" (0-based suffix)
+                    // So we match by index position: criterionId 1 -> index 0, criterionId 2 -> index 1, etc.
+                    const criterionIndex = typeof result.criterionId === 'number' 
+                      ? result.criterionId - 1 
+                      : parseInt(String(result.criterionId), 10) - 1;
+                    const criterion = schemaCriteria[criterionIndex] || schemaCriteria.find(c => c.id === result.criterionId);
+                    
+                    // Show fallback if criterion not found
+                    const criterionName = criterion?.name || `Criterion #${result.criterionId}`;
+                    const criterionType = criterion?.type || 'Unknown';
+                    const maxScore = criterion?.scoringStandard?.passed || 10;
 
                     return (
                       <Card key={result.criterionId}>
@@ -510,9 +521,9 @@ export function CallDetailDialog({
                             <div className="flex-1 space-y-2">
                               <div className="flex items-start justify-between">
                                 <div>
-                                  <h4 className="font-semibold">{criterion.name}</h4>
+                                  <h4 className="font-semibold">{criterionName}</h4>
                                   <p className="text-xs text-muted-foreground mt-0.5">
-                                    {criterion.type}
+                                    {criterionType}
                                   </p>
                                 </div>
                                 <Badge
@@ -522,7 +533,7 @@ export function CallDetailDialog({
                                 </Badge>
                               </div>
                               <Progress
-                                value={(result.score / criterion.scoringStandard.passed) * 100}
+                                value={(result.score / maxScore) * 100}
                                 className="h-2"
                               />
                               <div className="text-sm">

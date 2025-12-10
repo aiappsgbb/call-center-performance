@@ -197,6 +197,47 @@ export interface AgentPerformance {
   topWeaknesses: number[];
   sentimentDistribution?: Record<SentimentLabel, number>;
   dominantSentiment?: SentimentLabel;
+  
+  // Enhanced metrics
+  avgCallDuration?: number;           // Average call duration in ms
+  totalCallDuration?: number;         // Total time spent on calls
+  passRate?: number;                  // Percentage of criteria passed
+  perfectScoreCalls?: number;         // Calls with 100% score
+  failedCalls?: number;               // Calls below threshold (e.g., <60%)
+  
+  // Topic/Category performance
+  topTopics?: Array<{ topic: string; count: number; avgScore: number }>;
+  
+  // AI Insights aggregation (from schemaInsights)
+  insightSummary?: Record<string, {
+    categoryName: string;
+    avgNumericValue?: number;
+    mostCommonValue?: string;
+    distribution?: Record<string, number>;
+  }>;
+  
+  // Time-based analysis
+  performanceByPeriod?: Array<{
+    period: string;
+    avgScore: number;
+    callCount: number;
+  }>;
+  
+  // Comparison metrics
+  rankAmongAgents?: number;           // Rank (1 = best)
+  percentileRank?: number;            // Percentile (0-100)
+  aboveAverage?: boolean;             // Above team average?
+  
+  // Consistency metrics
+  scoreStdDev?: number;               // Standard deviation of scores
+  consistencyRating?: 'consistent' | 'variable' | 'inconsistent';
+  
+  // Recent performance
+  recentCalls?: Array<{
+    callId: string;
+    score: number;
+    date: string;
+  }>;
 }
 
 export interface CriteriaAnalytics {
