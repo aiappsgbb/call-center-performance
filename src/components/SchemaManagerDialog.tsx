@@ -1127,7 +1127,15 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
                     <div className="flex gap-2">
                       <Button
                         onClick={() => {
-                          const schemaCalls = calls.filter(call => call.schemaId === selectedSchema.id);
+                          // Include calls that either match the schema or have no schemaId (legacy calls)
+                          const schemaCalls = calls.filter(call => 
+                            call.schemaId === selectedSchema.id || !call.schemaId
+                          );
+                          console.log('Recalculate: Total calls:', calls.length);
+                          console.log('Recalculate: Schema ID:', selectedSchema.id);
+                          console.log('Recalculate: Matching calls:', schemaCalls.length);
+                          console.log('Recalculate: Call schemaIds:', calls.map(c => c.schemaId));
+                          
                           if (schemaCalls.length === 0) {
                             toast.info('No calls to recalculate');
                             return;
