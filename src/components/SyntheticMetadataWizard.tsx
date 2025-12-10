@@ -27,6 +27,7 @@ import {
   Lightbulb,
   ChatText,
   Spinner,
+  Calendar,
 } from '@phosphor-icons/react';
 import { SchemaDefinition, FieldDefinition } from '@/types/schema';
 import { CallRecord, TranscriptPhrase, CallSentimentSegment, SentimentLabel } from '@/types/call';
@@ -85,6 +86,19 @@ export function SyntheticMetadataWizard({
   // Transcription generation options
   const [generateTranscriptions, setGenerateTranscriptions] = useState(false);
   const [transcriptionPrompt, setTranscriptionPrompt] = useState('');
+  
+  // Date range for synthetic records
+  const [dateRangeEnabled, setDateRangeEnabled] = useState(true);
+  const [dateFrom, setDateFrom] = useState(() => {
+    // Default: 30 days ago
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [dateTo, setDateTo] = useState(() => {
+    // Default: today
+    return new Date().toISOString().split('T')[0];
+  });
   
   // Participant occurrence limits
   const [maxParticipant1Occurrences, setMaxParticipant1Occurrences] = useState(5);

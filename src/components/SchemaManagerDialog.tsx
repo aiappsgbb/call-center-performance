@@ -1125,6 +1125,25 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
                     </p>
                     <div className="flex gap-2">
                       <Button
+                        onClick={() => {
+                          const schemaCalls = calls.filter(call => call.schemaId === selectedSchema.id);
+                          if (schemaCalls.length === 0) {
+                            toast.info('No calls to recalculate');
+                            return;
+                          }
+                          toast.info('Recalculating formulas for all calls...', { duration: 1500 });
+                          const updatedCalls = recalculateCallMetadata(selectedSchema, calls);
+                          setCalls(updatedCalls);
+                          toast.success(`Recalculated formulas for ${schemaCalls.length} calls`);
+                        }}
+                        size="sm"
+                        variant="outline"
+                        title="Recalculate all formulas for existing calls"
+                      >
+                        <Calculator className="mr-2 h-4 w-4" />
+                        Recalculate All
+                      </Button>
+                      <Button
                         onClick={handleDiscoverRelationships}
                         size="sm"
                         variant="outline"
