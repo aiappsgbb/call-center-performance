@@ -446,20 +446,18 @@ Example structure:
             </div>
 
             <Card>
-              <CardHeader className="pb-3">
+              <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Schema Fields</CardTitle>
               </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[150px]">
-                  <div className="flex flex-wrap gap-2">
-                    {editableFields.map(field => (
-                      <Badge key={field.id} variant="secondary" className="text-xs">
-                        {field.displayName}
-                        <span className="ml-1 text-muted-foreground">({field.type})</span>
-                      </Badge>
-                    ))}
-                  </div>
-                </ScrollArea>
+              <CardContent className="pt-0">
+                <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto">
+                  {editableFields.map(field => (
+                    <Badge key={field.id} variant="secondary" className="text-xs whitespace-nowrap">
+                      {field.displayName}
+                      <span className="ml-1 text-muted-foreground">({field.type})</span>
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -925,7 +923,7 @@ Example structure:
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent 
-        className="max-w-2xl max-h-[90vh]"
+        className="max-w-3xl w-[90vw] max-h-[90vh] overflow-hidden flex flex-col"
         onPointerDownOutside={(e) => {
           if (isGenerating) e.preventDefault();
         }}
@@ -976,7 +974,7 @@ Example structure:
         <Separator />
 
         {/* Step content */}
-        <div className="py-4">
+        <div className="flex-1 overflow-y-auto py-4 min-h-0">
           {renderStepContent()}
         </div>
 

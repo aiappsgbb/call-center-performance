@@ -39,7 +39,8 @@ import {
   Scale,
   Tag,
   Info,
-  Plane
+  Plane,
+  Phone
 } from 'lucide-react';
 
 interface SchemaTemplateSelectorProps {
@@ -74,6 +75,8 @@ export function SchemaTemplateSelector({
         return <Stethoscope className="h-5 w-5" />;
       case 'airline':
         return <Plane className="h-5 w-5" />;
+      case 'telecom':
+        return <Phone className="h-5 w-5" />;
       default:
         return <Star className="h-5 w-5" />;
     }
