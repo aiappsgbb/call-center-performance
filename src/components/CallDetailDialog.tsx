@@ -578,6 +578,9 @@ export function CallDetailDialog({
                   )}
 
                   {/* Legacy Insights (for backward compatibility with existing data) */}
+                  {/* Only show legacy insights when schema has NO dynamic insight categories */}
+                  {(!schema.insightCategories || schema.insightCategories.length === 0) && (
+                    <>
                   {/* Risk Insight - Compact View */}
                   {call.evaluation?.riskInsight && (
                     <Card>
@@ -800,6 +803,8 @@ export function CallDetailDialog({
                       </Card>
                     )}
                   </div>
+                    </>
+                  )}
                 </div>
               </ScrollArea>
             )}
