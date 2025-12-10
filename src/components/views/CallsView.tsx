@@ -5,7 +5,8 @@ import { CallRecord } from '@/types/call';
 import { SchemaDefinition } from '@/types/schema';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Upload, MagnifyingGlass, ArrowCounterClockwise, Microphone, FileCsv, Sparkle } from '@phosphor-icons/react';
+import { Upload, MagnifyingGlass, ArrowCounterClockwise, Microphone, FileCsv, Sparkle, ChartBar } from '@phosphor-icons/react';
+import { loadAzureConfigFromCookie } from '@/lib/azure-config-storage';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { CallsTable } from '@/components/CallsTable';
@@ -154,6 +155,98 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
         next.delete(call.id);
         return next;
       });
+    }
+  };
+
+  const handleEvaluateSelected = async () => {
+    // Filter for selected calls that have transcripts but aren't yet evaluated
+    const callsToEvaluate = (calls || []).filter(
+      (call) => selectedCallIds.has(call.id) && call.transcript && call.status !== 'evaluated'
+    );
+
+    if (callsToEvaluate.length === 0) {
+      toast.error('No transcribed calls selected for evaluation. Please select calls that have been transcribed.');
+      return;
+    }
+
+    if (!activeSchema) {
+      toast.error('Please select a schema first');
+      return;
+    }
+
+    // Get batch settings from config
+    const azureConfig = loadAzureConfigFromCookie();
+    const parallelBatches = azureConfig?.syntheticData?.parallelBatches ?? 3;
+
+    // Mark all calls as evaluating
+    const callIdsToEvaluate = new Set(callsToEvaluate.map(c => c.id));
+    setEvaluatingIds(callIdsToEvaluate);
+
+    const startTime = Date.now();
+    toast.info(`🚀 Starting parallel evaluation for ${callsToEvaluate.length} call(s) with ${parallelBatches} parallel batches...`);
+
+    // Set up progress tracking
+    setBatchProgress({ completed: 0, total: callsToEvaluate.length });
+
+    let completedCount = 0;
+    let successCount = 0;
+    let failCount = 0;
+
+    // Process in parallel batches
+    for (let i = 0; i < callsToEvaluate.length; i += parallelBatches) {
+      const batch = callsToEvaluate.slice(i, i + parallelBatches);
+      
+      // Process batch in parallel
+      const batchPromises = batch.map(async (call) => {
+        try {
+          const evaluation = await azureOpenAIService.evaluateCall(
+            call.transcript!,
+            call.metadata,
+            activeSchema,
+            call.id,
+          );
+
+          const updatedCall: CallRecord = {
+            ...call,
+            evaluation,
+            status: 'evaluated',
+            updatedAt: new Date().toISOString(),
+          };
+
+          // Update the call immediately
+          onUpdateCalls((prev) => (prev || []).map((c) => (c.id === call.id ? updatedCall : c)));
+          
+          successCount++;
+          return { success: true, call: updatedCall };
+        } catch (error) {
+          console.error(`Evaluation error for ${call.id}:`, error);
+          failCount++;
+          return { success: false, callId: call.id, error };
+        } finally {
+          completedCount++;
+          setBatchProgress({ completed: completedCount, total: callsToEvaluate.length });
+          
+          // Remove from evaluating set
+          setEvaluatingIds((prev) => {
+            const next = new Set(prev);
+            next.delete(call.id);
+            return next;
+          });
+        }
+      });
+
+      // Wait for this batch to complete before starting the next
+      await Promise.all(batchPromises);
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    setBatchProgress(null);
+    setSelectedCallIds(new Set());
+
+    if (failCount === 0) {
+      toast.success(`✅ Evaluated ${successCount} calls in ${duration}s`);
+    } else {
+      toast.warning(`Completed: ${successCount} succeeded, ${failCount} failed in ${duration}s`);
     }
   };
 
@@ -365,6 +458,10 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
               <Button onClick={handleTranscribeSelected} variant="default">
                 <Microphone className="mr-2" size={18} />
                 Transcribe Selected ({selectedCallIds.size})
+              </Button>
+              <Button onClick={handleEvaluateSelected} variant="default">
+                <ChartBar className="mr-2" size={18} />
+                Evaluate Selected ({selectedCallIds.size})
               </Button>
               <Button onClick={handleDeselectAll} variant="outline" size="sm">
                 Deselect All
