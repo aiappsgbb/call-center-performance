@@ -215,6 +215,15 @@ export function SyntheticMetadataWizard({
       ? `\nBATCH CONTEXT: This is batch ${batchIndex + 1} of ${totalBatches}. Ensure variety - generate different scenarios from other batches.\n`
       : '';
 
+    // Build date range constraint for the LLM
+    const dateRangeConstraint = dateRangeEnabled
+      ? `\nDATE RANGE CONSTRAINT:
+For ALL date/timestamp fields in the records, generate random dates between ${dateFrom} and ${dateTo}.
+Distribute dates evenly across this range - each record should have a different date.
+Use ISO format: YYYY-MM-DD for date fields, or full ISO timestamp YYYY-MM-DDTHH:MM:SS for datetime fields.
+`
+      : '';
+
     return `You are a data generation assistant. Generate ${batchRecordCount} realistic and diverse synthetic metadata records for a ${schema.name} schema.
 
 SCHEMA NAME: ${schema.name}
@@ -224,7 +233,7 @@ ${schema.businessContext || 'General business data'}
 
 FIELDS TO GENERATE:
 ${fieldDescriptions}
-${participantConstraints}
+${participantConstraints}${dateRangeConstraint}
 ${existingDataSample.length > 0 ? `
 EXISTING DATA SAMPLE (for reference style and patterns):
 ${JSON.stringify(existingDataSample, null, 2)}
@@ -240,7 +249,7 @@ GENERATION REQUIREMENTS:
 5. Make the data realistic and varied based on the business context
 6. If additional user instructions are provided, follow them precisely
 7. Ensure diversity across records (different values, scenarios)
-8. For date fields, use ISO format (YYYY-MM-DD)
+8. For date fields: ${dateRangeEnabled ? `MUST use dates between ${dateFrom} and ${dateTo} - distribute randomly across this range` : 'use ISO format (YYYY-MM-DD)'}
 9. For number fields, provide numeric values (not strings)
 10. For boolean fields, use true/false
 ${participant1Field || participant2Field ? `11. IMPORTANT: Respect participant limits - reuse names to stay within the max unique count specified` : ''}

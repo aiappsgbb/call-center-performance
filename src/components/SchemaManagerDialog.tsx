@@ -270,10 +270,30 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
    * Recalculate formulas for all calls matching a schema
    * Used when relationships are added after CSV import
    */
+  // Helper to fix old formulas that use bare field names instead of metadata.fieldName
+  const fixFormulaFieldReferences = (formula: string, metadataKeys: string[]): string => {
+    let fixedFormula = formula;
+    
+    // Sort by length descending to replace longer field names first (avoid partial replacements)
+    const sortedKeys = [...metadataKeys].sort((a, b) => b.length - a.length);
+    
+    for (const key of sortedKeys) {
+      // Match bare field name that isn't already prefixed with "metadata."
+      // Negative lookbehind for "metadata." and word boundaries
+      const regex = new RegExp(`(?<!metadata\\.)\\b${key}\\b(?!\\s*:)`, 'g');
+      fixedFormula = fixedFormula.replace(regex, `metadata.${key}`);
+    }
+    
+    return fixedFormula;
+  };
+
   const recalculateCallMetadata = (schema: SchemaDefinition, callsToUpdate: CallRecord[]) => {
     const complexRelationships = schema.relationships.filter(
       rel => rel.type === 'complex' && rel.formula
     );
+
+    console.log('Recalculate: Found complex relationships:', complexRelationships.length);
+    console.log('Recalculate: Relationships:', complexRelationships.map(r => ({ id: r.id, formula: r.formula })));
 
     if (complexRelationships.length === 0) return callsToUpdate;
 
@@ -281,11 +301,22 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
       if (call.schemaId !== schema.id) return call;
 
       const updatedMetadata = { ...call.metadata };
+      const metadataKeys = Object.keys(updatedMetadata);
 
       // Calculate each formula
       for (const rel of complexRelationships) {
         try {
-          const result = executeFormula(rel.formula!, updatedMetadata);
+          // Auto-fix old formulas that don't use metadata. prefix
+          let formula = rel.formula!;
+          if (!formula.includes('metadata.')) {
+            console.log(`Recalculate: Auto-fixing formula for ${rel.id}`);
+            formula = fixFormulaFieldReferences(formula, metadataKeys);
+            console.log(`Recalculate: Fixed formula:`, formula);
+          }
+          
+          console.log(`Recalculate: Executing formula for ${rel.id} with metadata:`, metadataKeys);
+          const result = executeFormula(formula, updatedMetadata);
+          console.log(`Recalculate: Result for ${rel.id}:`, result);
           if (result.success) {
             updatedMetadata[`calc_${rel.id}`] = result.result;
           }
