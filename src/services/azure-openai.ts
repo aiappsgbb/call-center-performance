@@ -1,6 +1,7 @@
 import { CallMetadata, CallEvaluation, EvaluationResult, EvaluationCriterion, TranscriptPhrase, CallSentimentSegment, SentimentLabel, ProductInsight, RiskInsight, NationalityInsight, OutcomeInsight, BorrowerInsight, RiskTier, CategorizedOutcome, CallRecord, TopicInsight, TopicsAndPhrasesInsight } from '@/types/call';
-import { SchemaDefinition, TopicDefinition } from '@/types/schema';
+import { SchemaDefinition, TopicDefinition, SchemaEvaluationRule } from '@/types/schema';
 import { EVALUATION_CRITERIA, getMaxScore } from '@/lib/evaluation-criteria';
+import { loadRulesForSchema } from '@/services/rules-generator';
 import type { AzureOpenAIConfig } from '@/configManager';
 import { LLMCaller, ChatMessage, LLMCallOptions } from '../llmCaller';
 import { preparePrompt } from '@/lib/prompt-loader';
@@ -13,6 +14,32 @@ export function setCustomEvaluationCriteria(criteria: EvaluationCriterion[] | nu
 }
 
 export function getActiveEvaluationCriteria(): EvaluationCriterion[] {
+  return CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
+}
+
+/**
+ * Get evaluation criteria for a specific schema
+ * This loads rules directly from localStorage for the given schema ID
+ * Falls back to global custom criteria, then default criteria
+ */
+export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCriterion[] {
+  // Try to load schema-specific rules first
+  const schemaRules = loadRulesForSchema(schemaId);
+  if (schemaRules && schemaRules.length > 0) {
+    console.log(`📋 Using ${schemaRules.length} rules for schema: ${schemaId}`);
+    return schemaRules.map(rule => ({
+      id: rule.id,
+      type: rule.type,
+      name: rule.name,
+      definition: rule.definition,
+      evaluationCriteria: rule.evaluationCriteria,
+      scoringStandard: rule.scoringStandard,
+      examples: rule.examples
+    }));
+  }
+  
+  // Fall back to global custom criteria or defaults
+  console.log(`📋 No rules for schema ${schemaId}, using global criteria`);
   return CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
 }
 
@@ -100,7 +127,8 @@ export class AzureOpenAIService {
     metadata: Record<string, any>,
     schema: SchemaDefinition
   ): Promise<string> {
-    const activeCriteria = getActiveEvaluationCriteria();
+    // Get criteria specific to this schema
+    const activeCriteria = getEvaluationCriteriaForSchema(schema.id);
     const criteriaText = activeCriteria.map((criterion) => {
       return `${criterion.id}. ${criterion.name} [${criterion.type}]
    Definition: ${criterion.definition}
@@ -271,8 +299,8 @@ ${topicsText}
         throw new Error('Invalid response format from AI - missing results array');
       }
 
-      // Calculate totals using active criteria
-      const activeCriteria = getActiveEvaluationCriteria();
+      // Calculate totals using criteria specific to this schema
+      const activeCriteria = getEvaluationCriteriaForSchema(schema.id);
 
       if (parsed.results.length !== activeCriteria.length) {
         console.warn(`⚠ Expected ${activeCriteria.length} results, got ${parsed.results.length}`);
