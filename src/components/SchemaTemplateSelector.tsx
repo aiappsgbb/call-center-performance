@@ -40,7 +40,8 @@ import {
   Tag,
   Info,
   Plane,
-  Phone
+  Phone,
+  Lightbulb
 } from 'lucide-react';
 
 interface SchemaTemplateSelectorProps {
@@ -202,6 +203,34 @@ export function SchemaTemplateSelector({
               <span className="text-[10px] text-muted-foreground">+{template.schema.topicTaxonomy.length - 5}</span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* AI Insights */}
+      {template.schema.insightCategories && template.schema.insightCategories.length > 0 && (
+        <div>
+          <h4 className="text-xs font-medium mb-1 flex items-center gap-1">
+            <Lightbulb className="h-3 w-3" /> AI Insights ({template.schema.insightCategories.length})
+          </h4>
+          <div className="space-y-0.5">
+            {template.schema.insightCategories.filter(c => c.enabled).slice(0, 4).map(insight => (
+              <div key={insight.id} className="text-[11px] bg-muted/50 rounded px-1.5 py-0.5 flex items-center gap-1">
+                <div 
+                  className="w-2 h-2 rounded-full shrink-0" 
+                  style={{ backgroundColor: insight.color }}
+                />
+                <span className="truncate">{insight.name}</span>
+                <Badge variant="outline" className="text-[8px] px-1 py-0 ml-auto shrink-0">
+                  {insight.outputFields.length} fields
+                </Badge>
+              </div>
+            ))}
+          </div>
+          {template.schema.insightCategories.filter(c => c.enabled).length > 4 && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">
+              +{template.schema.insightCategories.filter(c => c.enabled).length - 4} more...
+            </p>
+          )}
         </div>
       )}
     </div>
