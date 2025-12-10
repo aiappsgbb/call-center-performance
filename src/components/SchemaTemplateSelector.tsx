@@ -38,7 +38,8 @@ import {
   FileText,
   Scale,
   Tag,
-  Info
+  Info,
+  Plane
 } from 'lucide-react';
 
 interface SchemaTemplateSelectorProps {
@@ -71,6 +72,8 @@ export function SchemaTemplateSelector({
         return <TrendingUp className="h-5 w-5" />;
       case 'healthcare':
         return <Stethoscope className="h-5 w-5" />;
+      case 'airline':
+        return <Plane className="h-5 w-5" />;
       default:
         return <Star className="h-5 w-5" />;
     }
