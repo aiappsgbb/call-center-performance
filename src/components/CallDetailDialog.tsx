@@ -25,6 +25,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import ReactMarkdown from 'react-markdown';
 import { CallSentimentPlayer } from '@/components/call-player/CallSentimentPlayer';
 import { TranscriptConversation } from '@/components/TranscriptConversation';
+import { DynamicInsightGrid } from '@/components/DynamicInsightCard';
 import { DEFAULT_CALL_CENTER_LANGUAGES } from '@/lib/speech-languages';
 
 interface CallDetailDialogProps {
@@ -549,7 +550,8 @@ export function CallDetailDialog({
           </TabsContent>
 
           <TabsContent value="insights" className="space-y-4">
-            {!call.evaluation?.productInsight && !call.evaluation?.riskInsight ? (
+            {/* Check if we have any insights (either schema-driven or legacy) */}
+            {!call.evaluation?.productInsight && !call.evaluation?.riskInsight && !call.evaluation?.schemaInsights ? (
               <Card className="p-8 text-center">
                 <div className="space-y-4">
                   <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent/20">
@@ -566,8 +568,17 @@ export function CallDetailDialog({
             ) : (
               <ScrollArea className="h-[500px]">
                 <div className="pr-4 space-y-3">
+                  {/* Dynamic Schema-Driven Insights */}
+                  {schema.insightCategories && schema.insightCategories.length > 0 && call.evaluation?.schemaInsights && (
+                    <DynamicInsightGrid
+                      categories={schema.insightCategories}
+                      insightData={call.evaluation.schemaInsights}
+                    />
+                  )}
+
+                  {/* Legacy Insights (for backward compatibility with existing data) */}
                   {/* Risk Insight - Compact View */}
-                  {call.evaluation.riskInsight && (
+                  {call.evaluation?.riskInsight && (
                     <Card>
                       <CardHeader className="pb-3">
                         <CardTitle className="flex items-center justify-between text-base">
