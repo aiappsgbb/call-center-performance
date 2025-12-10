@@ -116,75 +116,75 @@ export function AgentDetailDialog({
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 pr-4">
-          <Tabs defaultValue="overview" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="criteria">Criteria</TabsTrigger>
-              <TabsTrigger value="insights">AI Insights</TabsTrigger>
-              <TabsTrigger value="history">Call History</TabsTrigger>
-            </TabsList>
+        <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="grid w-full grid-cols-4 flex-shrink-0">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="criteria">Criteria</TabsTrigger>
+            <TabsTrigger value="insights">AI Insights</TabsTrigger>
+            <TabsTrigger value="history">Call History</TabsTrigger>
+          </TabsList>
 
+          <ScrollArea className="flex-1 mt-4 pr-4">
             {/* Overview Tab */}
-            <TabsContent value="overview" className="space-y-4">
+            <TabsContent value="overview" className="space-y-4 mt-0">
               {/* Key Metrics Row */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-sm text-muted-foreground">Average Score</div>
-                    <div className="text-3xl font-bold">{performance.averagePercentage.toFixed(1)}%</div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Card className="min-w-0">
+                  <CardContent className="pt-4 px-3">
+                    <div className="text-xs text-muted-foreground">Average Score</div>
+                    <div className="text-2xl font-bold">{performance.averagePercentage.toFixed(1)}%</div>
                     <div className={cn(
-                      "text-xs flex items-center gap-1",
+                      "text-xs flex items-center gap-1 truncate",
                       vsTeamAvg > 0 ? "text-green-600" : vsTeamAvg < 0 ? "text-red-600" : "text-muted-foreground"
                     )}>
-                      {vsTeamAvg > 0 ? <ArrowUp size={12} /> : vsTeamAvg < 0 ? <ArrowDown size={12} /> : null}
+                      {vsTeamAvg > 0 ? <ArrowUp size={12} className="flex-shrink-0" /> : vsTeamAvg < 0 ? <ArrowDown size={12} className="flex-shrink-0" /> : null}
                       {vsTeamAvg > 0 ? '+' : ''}{vsTeamAvg.toFixed(1)}% vs team
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-sm text-muted-foreground">Pass Rate</div>
-                    <div className="text-3xl font-bold">{performance.passRate?.toFixed(0) || 0}%</div>
-                    <div className="text-xs text-muted-foreground">criteria passed</div>
+                <Card className="min-w-0">
+                  <CardContent className="pt-4 px-3">
+                    <div className="text-xs text-muted-foreground">Pass Rate</div>
+                    <div className="text-2xl font-bold">{performance.passRate?.toFixed(0) || 0}%</div>
+                    <div className="text-xs text-muted-foreground truncate">criteria passed</div>
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-sm text-muted-foreground">Trend</div>
-                    <div className="flex items-center gap-2">
+                <Card className="min-w-0">
+                  <CardContent className="pt-4 px-3">
+                    <div className="text-xs text-muted-foreground">Trend</div>
+                    <div className="flex items-center gap-1 mt-1">
                       <Badge
                         variant={
                           performance.trend === 'up' ? 'default' :
                           performance.trend === 'down' ? 'destructive' : 'secondary'
                         }
-                        className="text-lg px-3 py-1"
+                        className="text-sm px-2 py-0.5"
                       >
-                        {performance.trend === 'up' && <TrendUp size={16} className="mr-1" />}
-                        {performance.trend === 'down' && <TrendDown size={16} className="mr-1" />}
-                        {performance.trend === 'stable' && <Minus size={16} className="mr-1" />}
+                        {performance.trend === 'up' && <TrendUp size={14} className="mr-1" />}
+                        {performance.trend === 'down' && <TrendDown size={14} className="mr-1" />}
+                        {performance.trend === 'stable' && <Minus size={14} className="mr-1" />}
                         {performance.trend}
                       </Badge>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="text-sm text-muted-foreground">Consistency</div>
+                <Card className="min-w-0">
+                  <CardContent className="pt-4 px-3">
+                    <div className="text-xs text-muted-foreground">Consistency</div>
                     <Badge 
                       variant="outline" 
                       className={cn(
-                        "text-lg px-3 py-1",
+                        "text-sm px-2 py-0.5 mt-1",
                         performance.consistencyRating === 'consistent' ? 'border-green-500 text-green-600' :
                         performance.consistencyRating === 'variable' ? 'border-yellow-500 text-yellow-600' :
                         'border-red-500 text-red-600'
                       )}
                     >
-                      <Gauge size={16} className="mr-1" />
-                      {performance.consistencyRating || 'N/A'}
+                      <Gauge size={14} className="mr-1 flex-shrink-0" />
+                      <span className="truncate">{performance.consistencyRating || 'N/A'}</span>
                     </Badge>
                   </CardContent>
                 </Card>
@@ -339,44 +339,61 @@ export function AgentDetailDialog({
             {/* AI Insights Tab */}
             <TabsContent value="insights" className="space-y-4">
               {performance.insightSummary && Object.keys(performance.insightSummary).length > 0 ? (
-                Object.entries(performance.insightSummary).map(([categoryId, summary]) => (
-                  <Card key={categoryId}>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base">{summary.categoryName}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        {summary.avgNumericValue !== undefined && (
-                          <div className="flex justify-between">
-                            <span className="text-sm text-muted-foreground">Average Score</span>
-                            <span className="font-medium">{summary.avgNumericValue.toFixed(1)}</span>
+                <div className="grid gap-4">
+                  {Object.entries(performance.insightSummary).map(([categoryId, summary]) => {
+                    const hasNumericValue = summary.avgNumericValue !== undefined && !isNaN(summary.avgNumericValue);
+                    const hasDistribution = summary.distribution && Object.keys(summary.distribution).length > 0;
+                    
+                    return (
+                      <Card key={categoryId}>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base font-semibold">{summary.categoryName}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          {/* Stats Row */}
+                          <div className="grid grid-cols-2 gap-4">
+                            {hasNumericValue && (
+                              <div className="bg-muted/50 rounded-lg p-3">
+                                <div className="text-xs text-muted-foreground mb-1">Average Score</div>
+                                <div className="text-xl font-bold">{summary.avgNumericValue!.toFixed(1)}</div>
+                              </div>
+                            )}
+                            {summary.mostCommonValue && (
+                              <div className="bg-muted/50 rounded-lg p-3">
+                                <div className="text-xs text-muted-foreground mb-1">Most Common</div>
+                                <Badge variant="secondary" className="text-sm mt-1">{summary.mostCommonValue}</Badge>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {summary.mostCommonValue && (
-                          <div className="flex justify-between">
-                            <span className="text-sm text-muted-foreground">Most Common</span>
-                            <Badge variant="secondary">{summary.mostCommonValue}</Badge>
-                          </div>
-                        )}
-                        {summary.distribution && Object.keys(summary.distribution).length > 0 && (
-                          <div className="pt-2">
-                            <div className="text-sm text-muted-foreground mb-2">Distribution</div>
-                            <div className="flex flex-wrap gap-2">
-                              {Object.entries(summary.distribution)
-                                .sort((a, b) => b[1] - a[1])
-                                .slice(0, 5)
-                                .map(([value, count]) => (
-                                  <Badge key={value} variant="outline">
-                                    {value}: {count}
-                                  </Badge>
-                                ))}
+                          
+                          {/* Distribution */}
+                          {hasDistribution && (
+                            <div>
+                              <div className="text-xs text-muted-foreground mb-2">Distribution</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(summary.distribution!)
+                                  .sort((a, b) => b[1] - a[1])
+                                  .slice(0, 8)
+                                  .map(([value, count]) => (
+                                    <Badge key={value} variant="outline" className="text-xs">
+                                      {value.length > 40 ? value.substring(0, 40) + '...' : value}: {count}
+                                    </Badge>
+                                  ))}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))
+                          )}
+                          
+                          {/* Empty state for this category */}
+                          {!hasNumericValue && !summary.mostCommonValue && !hasDistribution && (
+                            <div className="text-sm text-muted-foreground text-center py-2">
+                              No data collected for this insight category yet.
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               ) : (
                 <Card className="p-8 text-center">
                   <div className="text-muted-foreground">
@@ -452,8 +469,8 @@ export function AgentDetailDialog({
                 </Card>
               )}
             </TabsContent>
-          </Tabs>
-        </ScrollArea>
+          </ScrollArea>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
