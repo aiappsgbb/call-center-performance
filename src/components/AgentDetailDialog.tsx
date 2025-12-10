@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { CallRecord, EvaluationCriterion } from '@/types/call';
 import { calculateAgentPerformance, getPerformanceTrend, getAgentNameFromCall } from '@/lib/analytics';
-import { getCriterionById } from '@/lib/evaluation-criteria';
+import { getEvaluationCriteriaForSchema } from '@/services/azure-openai';
 import { PerformanceTrendChart } from '@/components/analytics/PerformanceTrendChart';
 import { Progress } from '@/components/ui/progress';
 
@@ -18,6 +18,7 @@ interface AgentDetailDialogProps {
   calls: CallRecord[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  schemaId?: string;
 }
 
 export function AgentDetailDialog({
@@ -25,8 +26,12 @@ export function AgentDetailDialog({
   calls,
   open,
   onOpenChange,
+  schemaId,
 }: AgentDetailDialogProps) {
   const agentCalls = calls.filter((c) => getAgentNameFromCall(c) === agentName);
+  
+  // Load schema-specific evaluation criteria
+  const schemaCriteria = schemaId ? getEvaluationCriteriaForSchema(schemaId) : [];
   const performances = calculateAgentPerformance(agentCalls);
   const performance = performances[0];
 
@@ -112,10 +117,11 @@ export function AgentDetailDialog({
             </CardHeader>
             <CardContent className="space-y-4">
               {sortedCriteria.map(({ id, score }) => {
-                const criterion = getCriterionById(id);
+                const criterion = schemaCriteria.find(c => c.id === id);
                 if (!criterion) return null;
 
-                const percentage = (score / criterion.scoringStandard.passed) * 100;
+                const maxScore = criterion.scoringStandard?.passed || 10;
+                const percentage = (score / maxScore) * 100;
                 const isStrength = performance.topStrengths.includes(id);
                 const isWeakness = performance.topWeaknesses.includes(id);
 
@@ -136,7 +142,7 @@ export function AgentDetailDialog({
                         )}
                       </div>
                       <span className="text-sm font-semibold">
-                        {score.toFixed(1)} / {criterion.scoringStandard.passed}
+                        {score.toFixed(1)} / {maxScore}
                       </span>
                     </div>
                     <Progress value={percentage} className="h-2" />

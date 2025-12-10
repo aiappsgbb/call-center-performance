@@ -40,7 +40,7 @@ import { BorrowerInsightsChart } from '@/components/analytics/BorrowerInsightsCh
 import { CustomAnalyticsChart } from '@/components/analytics/CustomAnalyticsChart';
 import { KeyPhrasesCloud } from '@/components/analytics/KeyPhrasesCloud';
 import { AnalyticsConfigWizard } from '@/components/AnalyticsConfigWizard';
-import { getCriterionById } from '@/lib/evaluation-criteria';
+import { getEvaluationCriteriaForSchema } from '@/services/azure-openai';
 import { regenerateInsights } from '@/services/azure-openai';
 import { Sparkles, Loader2, TrendingUp, TrendingDown, Minus, Phone, Clock, SmilePlus, Hash } from 'lucide-react';
 import { toast } from 'sonner';
@@ -543,7 +543,7 @@ export function AnalyticsView({ activeSchema, schemaLoading }: AnalyticsViewProp
               <CardTitle>Criteria Pass Rates</CardTitle>
             </CardHeader>
             <CardContent>
-              <CriteriaAnalyticsChart analytics={criteriaAnalytics} />
+              <CriteriaAnalyticsChart analytics={criteriaAnalytics} schemaId={activeSchema?.id} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -582,7 +582,8 @@ export function AnalyticsView({ activeSchema, schemaLoading }: AnalyticsViewProp
             <CardContent>
               <div className="space-y-4">
                 {weakestCriteria.map((analytics) => {
-                  const criterion = getCriterionById(analytics.criterionId);
+                  const schemaCriteria = activeSchema ? getEvaluationCriteriaForSchema(activeSchema.id) : [];
+                  const criterion = schemaCriteria.find(c => c.id === analytics.criterionId);
                   return (
                     <div
                       key={analytics.criterionId}

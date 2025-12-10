@@ -25,7 +25,14 @@ export function getActiveEvaluationCriteria(): EvaluationCriterion[] {
 export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCriterion[] {
   console.log(`🔍 getEvaluationCriteriaForSchema called with schemaId: "${schemaId}"`);
   
+  // Debug: List all evaluation-criteria keys in localStorage
+  const allKeys = Object.keys(localStorage).filter(k => k.startsWith('evaluation-criteria'));
+  console.log(`🔍 All evaluation-criteria keys in localStorage:`, allKeys);
+  
   // Try to load schema-specific rules first
+  const expectedKey = `evaluation-criteria-${schemaId}`;
+  console.log(`🔍 Looking for key: "${expectedKey}"`);
+  
   const schemaRules = loadRulesForSchema(schemaId);
   console.log(`🔍 loadRulesForSchema returned:`, schemaRules ? `${schemaRules.length} rules` : 'null');
   
@@ -45,7 +52,7 @@ export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCrit
   
   // Fall back to global custom criteria or defaults
   const fallbackRules = CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
-  console.log(`⚠️ No rules for schema ${schemaId}, using ${CUSTOM_EVALUATION_CRITERIA ? 'global custom' : 'default'} criteria (${fallbackRules.length} rules)`);
+  console.log(`⚠️ No rules for schema ${schemaId}, using ${CUSTOM_EVALUATION_CRITERIA ? 'global custom' : 'DEFAULT HARDCODED'} criteria (${fallbackRules.length} rules)`);
   console.log(`⚠️ Fallback rule names: ${fallbackRules.map(r => r.name).join(', ')}`);
   return fallbackRules;
 }

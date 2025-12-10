@@ -123,6 +123,7 @@ export function AgentsView({ activeSchema, schemaLoading }: AgentsViewProps) {
           calls={calls || []}
           open={!!selectedAgent}
           onOpenChange={(open) => !open && setSelectedAgent(null)}
+          schemaId={activeSchema?.id}
         />
       )}
     </div>

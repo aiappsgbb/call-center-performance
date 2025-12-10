@@ -15,9 +15,8 @@ import { Progress } from '@/components/ui/progress';
 import { CallRecord } from '@/types/call';
 import { SchemaDefinition } from '@/types/schema';
 import { AzureServicesConfig } from '@/types/config';
-import { azureOpenAIService, getActiveEvaluationCriteria } from '@/services/azure-openai';
+import { azureOpenAIService, getActiveEvaluationCriteria, getEvaluationCriteriaForSchema } from '@/services/azure-openai';
 import { STTCaller } from '../STTCaller';
-import { getCriterionById } from '@/lib/evaluation-criteria';
 import { DynamicDetailView, DynamicDetailSummary } from '@/components/DynamicDetailView';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, MinusCircle, Sparkle, Microphone } from '@phosphor-icons/react';
@@ -455,7 +454,7 @@ export function CallDetailDialog({
                   <div>
                     <h3 className="text-lg font-semibold">Ready to Evaluate</h3>
                     <p className="text-sm text-muted-foreground mt-1">
-                      Use AI to evaluate this call against {getActiveEvaluationCriteria().length} quality criteria
+                      Use AI to evaluate this call against {getEvaluationCriteriaForSchema(schema.id).length} quality criteria
                     </p>
                   </div>
                   <Button onClick={handleEvaluate} disabled={evaluating}>
@@ -478,7 +477,9 @@ export function CallDetailDialog({
 
                 <div className="space-y-3">
                   {call.evaluation.results.map((result) => {
-                    const criterion = getCriterionById(result.criterionId);
+                    // Get criteria for this call's schema
+                    const schemaCriteria = getEvaluationCriteriaForSchema(schema.id);
+                    const criterion = schemaCriteria.find(c => c.id === result.criterionId);
                     if (!criterion) return null;
 
                     return (
