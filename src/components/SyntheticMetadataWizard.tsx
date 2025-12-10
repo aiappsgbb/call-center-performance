@@ -588,6 +588,63 @@ Example structure:
                 </p>
               </div>
 
+              {/* Date Range Selection */}
+              <Separator />
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <Label className="text-base font-medium flex items-center gap-2">
+                      <Calendar size={18} />
+                      Date Range for Records
+                    </Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Generate records with random dates within a specified range
+                    </p>
+                  </div>
+                  <Switch
+                    checked={dateRangeEnabled}
+                    onCheckedChange={setDateRangeEnabled}
+                  />
+                </div>
+                
+                {dateRangeEnabled && (
+                  <div className="grid grid-cols-2 gap-4 pl-1">
+                    <div className="space-y-2">
+                      <Label htmlFor="dateFrom" className="text-sm">From Date</Label>
+                      <Input
+                        id="dateFrom"
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        max={dateTo}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="dateTo" className="text-sm">To Date</Label>
+                      <Input
+                        id="dateTo"
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        min={dateFrom}
+                        max={new Date().toISOString().split('T')[0]}
+                        className="w-full"
+                      />
+                    </div>
+                    <p className="col-span-2 text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                      💡 Records will be assigned random dates and times within this range for realistic distribution.
+                    </p>
+                  </div>
+                )}
+                
+                {!dateRangeEnabled && (
+                  <p className="text-xs text-muted-foreground">
+                    All records will use the current date/time when disabled.
+                  </p>
+                )}
+              </div>
+
               {/* Participant Occurrence Limits */}
               {(participant1Field || participant2Field) && (
                 <>

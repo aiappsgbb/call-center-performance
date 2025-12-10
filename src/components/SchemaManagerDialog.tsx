@@ -48,7 +48,7 @@ import {
   Sparkle,
   BookBookmark,
   Lightbulb,
-  Calculator,
+  ArrowCounterClockwise,
 } from '@phosphor-icons/react';
 import { SchemaDefinition, FieldDefinition, RelationshipDefinition, SemanticRole, FieldType, TopicDefinition, FieldDependency, DependencyOperator, InsightCategoryConfig, InsightOutputField } from '@/types/schema';
 import {
@@ -1141,7 +1141,7 @@ export function SchemaManagerDialog({ trigger, open, onOpenChange }: SchemaManag
                         variant="outline"
                         title="Recalculate all formulas for existing calls"
                       >
-                        <Calculator className="mr-2 h-4 w-4" />
+                        <ArrowCounterClockwise className="mr-2 h-4 w-4" />
                         Recalculate All
                       </Button>
                       <Button
