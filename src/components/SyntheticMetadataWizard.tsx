@@ -420,12 +420,32 @@ Example structure:
       return;
     }
 
-    const now = new Date().toISOString();
+    // Helper function to generate random date within range
+    const generateRandomDate = (): string => {
+      if (!dateRangeEnabled) {
+        return new Date().toISOString();
+      }
+      const from = new Date(dateFrom);
+      const to = new Date(dateTo);
+      // Set time to random hour of the day for more realism
+      from.setHours(0, 0, 0, 0);
+      to.setHours(23, 59, 59, 999);
+      
+      const fromTime = from.getTime();
+      const toTime = to.getTime();
+      const randomTime = fromTime + Math.random() * (toTime - fromTime);
+      
+      return new Date(randomTime).toISOString();
+    };
+
     const newCallRecords: CallRecord[] = selectedRecords.map(r => {
       // Determine status based on whether transcription was generated
       const hasTranscript = r.transcript && r.transcript.trim().length > 0;
       const hasPhrases = r.transcriptPhrases && r.transcriptPhrases.length > 0;
       const status = hasTranscript ? 'transcribed' : 'pending audio';
+      
+      // Generate random date for this record
+      const recordDate = generateRandomDate();
       
       return {
         id: r.id,
@@ -443,8 +463,8 @@ Example structure:
         sentimentSegments: r.sentimentSegments,
         overallSentiment: r.overallSentiment,
         status: status as CallRecord['status'],
-        createdAt: now,
-        updatedAt: now,
+        createdAt: recordDate,
+        updatedAt: recordDate,
       };
     });
 
