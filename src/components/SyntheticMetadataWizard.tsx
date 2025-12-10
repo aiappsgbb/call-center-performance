@@ -30,7 +30,9 @@ import {
 } from '@phosphor-icons/react';
 import { SchemaDefinition, FieldDefinition } from '@/types/schema';
 import { CallRecord, TranscriptPhrase, CallSentimentSegment, SentimentLabel } from '@/types/call';
+import { AzureServicesConfig } from '@/types/config';
 import { azureOpenAIService } from '@/services/azure-openai';
+import { loadAzureConfigFromCookie } from '@/lib/azure-config-storage';
 import { toast } from 'sonner';
 
 interface SyntheticMetadataWizardProps {

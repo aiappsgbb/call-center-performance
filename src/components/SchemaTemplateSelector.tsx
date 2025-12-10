@@ -210,7 +210,7 @@ export function SchemaTemplateSelector({
   return (
     <div className="flex gap-3 h-[380px]">
       {/* Left: Template List */}
-      <div className="w-[200px] shrink-0 flex flex-col">
+      <div className="w-[260px] shrink-0 flex flex-col">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'builtin' | 'custom')} className="flex-1 flex flex-col">
           <TabsList className="w-full h-7 mb-2">
             <TabsTrigger value="builtin" className="flex-1 text-[10px] h-6">Industry Templates</TabsTrigger>
