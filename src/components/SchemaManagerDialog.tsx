@@ -48,6 +48,7 @@ import {
   Sparkle,
   BookBookmark,
   Lightbulb,
+  Calculator,
 } from '@phosphor-icons/react';
 import { SchemaDefinition, FieldDefinition, RelationshipDefinition, SemanticRole, FieldType, TopicDefinition, FieldDependency, DependencyOperator, InsightCategoryConfig, InsightOutputField } from '@/types/schema';
 import {
