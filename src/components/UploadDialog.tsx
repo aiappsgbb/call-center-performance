@@ -44,8 +44,14 @@ export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, exist
     if (!firstCall.metadata) return false;
     
     // Look for any field that looks like an audio filename field
+    // Check for standard field names first (from templates), then fuzzy match
     return Object.entries(firstCall.metadata).some(([key, value]) => {
       const keyLower = key.toLowerCase();
+      // Standard field from templates
+      if (keyLower === 'audio_file_name' || keyLower === 'audiofilename') {
+        return true; // Field exists, even if empty (we can populate it)
+      }
+      // Fuzzy match for other audio-related fields with values
       return (
         keyLower.includes('audio') || 
         keyLower.includes('file') ||
@@ -135,10 +141,10 @@ export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, exist
           const audioBlob = new Blob([file], { type: file.type });
           const audioUrl = URL.createObjectURL(audioBlob);
           
-          // Create/update the audioFileName field in metadata
+          // Create/update the audio_file_name field in metadata (standard field from templates)
           const updatedMetadata = {
             ...call.metadata,
-            audioFileName: file.name, // Add the audio filename to metadata
+            audio_file_name: file.name, // Use standard field name from templates
           };
           
           const updatedCall: CallRecord = {
@@ -176,7 +182,7 @@ export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, exist
       onUpload(updatedCalls);
       
       const strategyMsg = effectiveStrategy === 'order' 
-        ? ' (matched by row order - audioFileName field created)'
+        ? ' (matched by row order - audio_file_name field created)'
         : ' (matched by filename)';
       
       if (unmatchedFiles.length > 0) {
@@ -228,7 +234,7 @@ export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, exist
                   </span>
                 ) : (
                   <span className="text-sm">
-                    <strong>No audio filename field found</strong> in metadata. Files will be matched by row order and an <code className="bg-muted px-1 rounded">audioFileName</code> field will be created automatically.
+                    <strong>No audio filename field found</strong> in metadata. Files will be matched by row order and an <code className="bg-muted px-1 rounded">audio_file_name</code> field will be created automatically.
                   </span>
                 )}
               </AlertDescription>
@@ -260,7 +266,7 @@ export function UploadDialog({ open, onOpenChange, onUpload, activeSchema, exist
             <p className="text-xs text-muted-foreground">
               {effectiveStrategy === 'filename' 
                 ? 'Files will be matched to records where metadata contains the filename.'
-                : 'Files will be sorted alphabetically and assigned to records by row order. An audioFileName field will be added to metadata.'}
+                : 'Files will be sorted alphabetically and assigned to records by row order. An audio_file_name field will be added to metadata.'}
             </p>
           </div>
 
