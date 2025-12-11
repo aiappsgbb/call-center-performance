@@ -17,29 +17,28 @@ export function getActiveEvaluationCriteria(): EvaluationCriterion[] {
   return CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
 }
 
+// Cache for evaluation criteria to prevent repeated localStorage reads on every render
+const evaluationCriteriaCache = new Map<string, { criteria: EvaluationCriterion[], timestamp: number }>();
+const CACHE_TTL_MS = 5000; // 5 second cache
+
 /**
  * Get evaluation criteria for a specific schema
  * This loads rules directly from localStorage for the given schema ID
  * Falls back to global custom criteria, then default criteria
  */
 export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCriterion[] {
-  console.log(`🔍 getEvaluationCriteriaForSchema called with schemaId: "${schemaId}"`);
+  // Check cache first
+  const cached = evaluationCriteriaCache.get(schemaId);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.criteria;
+  }
   
-  // Debug: List all evaluation-criteria keys in localStorage
-  const allKeys = Object.keys(localStorage).filter(k => k.startsWith('evaluation-criteria'));
-  console.log(`🔍 All evaluation-criteria keys in localStorage:`, allKeys);
-  
-  // Try to load schema-specific rules first
-  const expectedKey = `evaluation-criteria-${schemaId}`;
-  console.log(`🔍 Looking for key: "${expectedKey}"`);
-  
+  // Load from localStorage
   const schemaRules = loadRulesForSchema(schemaId);
-  console.log(`🔍 loadRulesForSchema returned:`, schemaRules ? `${schemaRules.length} rules` : 'null');
   
+  let criteria: EvaluationCriterion[];
   if (schemaRules && schemaRules.length > 0) {
-    console.log(`📋 Using ${schemaRules.length} schema-specific rules for: ${schemaId}`);
-    console.log(`📋 Rule names: ${schemaRules.map(r => r.name).join(', ')}`);
-    return schemaRules.map(rule => ({
+    criteria = schemaRules.map(rule => ({
       id: rule.id,
       type: rule.type,
       name: rule.name,
@@ -48,13 +47,26 @@ export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCrit
       scoringStandard: rule.scoringStandard,
       examples: rule.examples
     }));
+  } else {
+    // Fall back to global custom criteria or defaults
+    criteria = CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
   }
   
-  // Fall back to global custom criteria or defaults
-  const fallbackRules = CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
-  console.log(`⚠️ No rules for schema ${schemaId}, using ${CUSTOM_EVALUATION_CRITERIA ? 'global custom' : 'DEFAULT HARDCODED'} criteria (${fallbackRules.length} rules)`);
-  console.log(`⚠️ Fallback rule names: ${fallbackRules.map(r => r.name).join(', ')}`);
-  return fallbackRules;
+  // Update cache
+  evaluationCriteriaCache.set(schemaId, { criteria, timestamp: Date.now() });
+  
+  return criteria;
+}
+
+/**
+ * Clear the evaluation criteria cache (call when rules are updated)
+ */
+export function clearEvaluationCriteriaCache(schemaId?: string): void {
+  if (schemaId) {
+    evaluationCriteriaCache.delete(schemaId);
+  } else {
+    evaluationCriteriaCache.clear();
+  }
 }
 
 /**

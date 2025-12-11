@@ -355,32 +355,51 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
         }
       );
 
-      // Update calls with generated audio
+      console.log(`🔊 Batch generation complete. Results:`, Array.from(results.entries()).map(([id, r]) => ({ id, hasResult: !!r })));
+
+      // Collect all updates to apply in a single batch
+      const updatesToApply: Array<{ callId: string; audioBlob: Blob; voiceAssignments: string }> = [];
+      
       for (const [callId, result] of results) {
         if (result) {
+          console.log(`🔊 Storing audio for call ${callId}, blob size: ${result.audioBlob.size}`);
           // Store audio in IndexedDB
           await storeAudioFile(callId, result.audioBlob);
-
-          // Update the call
-          onUpdateCalls((prev) =>
-            (prev || []).map((c) =>
-              c.id === callId
-                ? {
-                    ...c,
-                    audioFile: result.audioBlob,
-                    metadata: {
-                      ...c.metadata,
-                      syntheticAudioGenerated: true,
-                      syntheticAudioVoices: result.voiceAssignments
-                        .map(v => `${v.speakerLabel}: ${v.voiceName}`)
-                        .join(', '),
-                    },
-                    updatedAt: new Date().toISOString(),
-                  }
-                : c
-            )
-          );
+          
+          updatesToApply.push({
+            callId,
+            audioBlob: result.audioBlob,
+            voiceAssignments: result.voiceAssignments
+              .map(v => `${v.speakerLabel}: ${v.voiceName}`)
+              .join(', '),
+          });
         }
+      }
+
+      console.log(`🔊 Applying ${updatesToApply.length} call updates in single batch`);
+
+      // Apply all updates in a single state update to avoid race conditions
+      if (updatesToApply.length > 0) {
+        onUpdateCalls((prev) => {
+          const updated = (prev || []).map((c) => {
+            const update = updatesToApply.find(u => u.callId === c.id);
+            if (update) {
+              console.log(`🔊 Updating call ${c.id} with synthetic audio`);
+              return {
+                ...c,
+                audioFile: update.audioBlob,
+                metadata: {
+                  ...c.metadata,
+                  syntheticAudioGenerated: true,
+                  syntheticAudioVoices: update.voiceAssignments,
+                },
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return c;
+          });
+          return updated;
+        });
       }
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
