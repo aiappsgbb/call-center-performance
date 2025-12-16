@@ -450,23 +450,23 @@ call-center-performance/
 Calls progress through the following statuses:
 
 ```
-                    Synthetic Data Generation
-                            ↓
-Uploaded → Transcribing → Transcribed → Evaluated
-    ↓                         ↓
-Pending Audio             Failed (on error)
-    ↓
-Audio Generation
-    ↓
-Transcribed (with audio)
+Real Calls:        Uploaded → Transcribing → Transcribed → Evaluated
+                                                  ↓
+                                           Failed (on error)
+
+Synthetic Calls:   Synthetic Generation → Transcribed → Evaluated
+                         ↓                     ↓
+                   Pending Audio          Generate Audio
+                         ↓                     ↓
+                   (needs real audio)    Transcribed (with audio)
 ```
 
 | Status | Badge Color | Description |
 |--------|-------------|-------------|
 | **Uploaded** | 🟦 Blue | Call data uploaded, ready for transcription |
-| **Pending Audio** | 🟪 Purple | Synthetic metadata created, awaiting audio generation |
+| **Pending Audio** | 🟪 Purple | Metadata generated without transcription, awaiting audio upload or generation |
 | **Transcribing** | 🟨 Yellow | Audio being processed by Azure Speech |
-| **Transcribed** | 🟩 Green | Transcript ready for evaluation |
+| **Transcribed** | 🟩 Green | Transcript ready for evaluation (can optionally generate synthetic audio) |
 | **Evaluated** | 🟢 Dark Green | Complete with scores |
 | **Failed** | 🔴 Red | Error occurred (check details) |
 
