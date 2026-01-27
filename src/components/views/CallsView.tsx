@@ -366,12 +366,23 @@ export function CallsView({ batchProgress, setBatchProgress, activeSchema, schem
 
     // Get config
     const azureConfig = loadAzureConfigFromCookie();
-    if (!azureConfig?.speech?.region || !azureConfig?.speech?.subscriptionKey) {
+    
+    // Check speech config - managedIdentity doesn't need anything (backend handles all)
+    const hasSpeechConfig = azureConfig?.speech?.authType === 'managedIdentity'
+      ? true  // Backend handles everything including region
+      : (azureConfig?.speech?.region && azureConfig?.speech?.subscriptionKey);
+    
+    if (!hasSpeechConfig) {
       toast.error('Azure Speech credentials not configured. Please configure in Settings.');
       return;
     }
 
-    if (!azureConfig?.openAI?.endpoint || !azureConfig?.openAI?.apiKey) {
+    // Check OpenAI config - managedIdentity doesn't need apiKey (backend handles auth)
+    const hasOpenAIConfig = azureConfig?.openAI?.authType === 'managedIdentity'
+      ? true
+      : (azureConfig?.openAI?.endpoint && azureConfig?.openAI?.apiKey);
+    
+    if (!hasOpenAIConfig) {
       toast.error('Azure OpenAI not configured. Needed for gender detection from names.');
       return;
     }

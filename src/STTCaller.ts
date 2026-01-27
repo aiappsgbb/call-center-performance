@@ -161,6 +161,11 @@ export class STTCaller {
       const data = await response.json();
       this.cachedAccessToken = data.token;
       this.tokenExpiresAt = Date.now() + (data.expiresIn * 1000);
+      // CRITICAL: Update region from backend if not set (backend knows the correct region)
+      if (data.region && !this.config.region) {
+        this.config.region = data.region;
+        console.log(`🌍 STT region set from backend: ${data.region}`);
+      }
       return data.token;
     }
 
@@ -739,13 +744,14 @@ export class STTCaller {
   validateConfig(): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
-    if (!this.config.region) {
+    // For managedIdentity, region is fetched from backend, so skip validation
+    if (this.config.authType !== 'managedIdentity' && !this.config.region) {
       errors.push('Azure Speech region is required');
     }
 
-    // For Entra ID auth, subscription key is not required
-    if (this.config.authType !== 'entraId' && !this.config.subscriptionKey) {
-      errors.push('Azure Speech subscription key is required (or use Entra ID authentication)');
+    // For Entra ID or Managed Identity auth, subscription key is not required
+    if (this.config.authType !== 'entraId' && this.config.authType !== 'managedIdentity' && !this.config.subscriptionKey) {
+      errors.push('Azure Speech subscription key is required (or use Entra ID/Managed Identity authentication)');
     }
 
     return {

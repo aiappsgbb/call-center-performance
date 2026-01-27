@@ -136,6 +136,11 @@ export class TTSCaller {
       const data = await response.json();
       this.cachedAccessToken = data.token;
       this.tokenExpiresAt = Date.now() + (data.expiresIn * 1000);
+      // Update region from backend if not set (backend knows the correct region)
+      if (data.region && !this.config.region) {
+        this.config.region = data.region;
+        console.log(`🌍 TTS region set from backend: ${data.region}`);
+      }
       return data.token;
     }
 

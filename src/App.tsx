@@ -123,6 +123,67 @@ function App() {
     initializeSchemas();
   }, []); // Run once on mount
 
+  // AUTO-DETECT managed identity from backend - ALWAYS check and update if needed
+  useEffect(() => {
+    const detectManagedIdentity = async () => {
+      try {
+        const response = await fetch('/api/config');
+        if (response.ok) {
+          const backendConfig = await response.json();
+          console.log('🔍 Backend config detected:', backendConfig);
+          
+          // If backend reports managedIdentity, ensure frontend config uses it
+          if (backendConfig?.openAI?.authType === 'managedIdentity' || backendConfig?.speech?.authType === 'managedIdentity') {
+            // Check if current config already has managedIdentity
+            const alreadyConfigured = azureConfig?.openAI?.authType === 'managedIdentity' && 
+                                      azureConfig?.speech?.authType === 'managedIdentity';
+            
+            if (!alreadyConfigured) {
+              const autoConfig: AzureServicesConfig = {
+                openAI: {
+                  endpoint: backendConfig.openAI?.endpoint || '',
+                  apiKey: '',  // Not needed for managedIdentity
+                  deploymentName: backendConfig.openAI?.deploymentName || '',
+                  apiVersion: '2024-12-01-preview',
+                  authType: 'managedIdentity',
+                },
+                speech: {
+                  region: backendConfig.speech?.region || '',
+                  subscriptionKey: '',  // Not needed for managedIdentity
+                  apiVersion: '2025-10-15',
+                  authType: 'managedIdentity',
+                  selectedLanguages: azureConfig?.speech?.selectedLanguages || DEFAULT_CALL_CENTER_LANGUAGES,
+                  diarizationEnabled: azureConfig?.speech?.diarizationEnabled ?? false,
+                  minSpeakers: azureConfig?.speech?.minSpeakers ?? 1,
+                  maxSpeakers: azureConfig?.speech?.maxSpeakers ?? 2,
+                },
+                entraId: {
+                  clientId: '',
+                  tenantId: '',
+                },
+                tts: {
+                  enabled: azureConfig?.tts?.enabled ?? true,
+                  defaultMaleVoice1: azureConfig?.tts?.defaultMaleVoice1,
+                  defaultMaleVoice2: azureConfig?.tts?.defaultMaleVoice2,
+                  defaultFemaleVoice1: azureConfig?.tts?.defaultFemaleVoice1,
+                  defaultFemaleVoice2: azureConfig?.tts?.defaultFemaleVoice2,
+                },
+              };
+              setAzureConfig(autoConfig);
+              console.log('✅ Auto-configured managed identity from backend');
+              toast.success('Azure services configured with Managed Identity');
+            }
+          }
+        }
+      } catch (error) {
+        // Not running on Azure with backend proxy - that's fine
+        console.log('ℹ️ Backend config not available (running locally?)');
+      }
+    };
+    
+    detectManagedIdentity();
+  }, []); // Run only once on mount, not dependent on azureConfig
+
   useEffect(() => {
     if (!azureConfig) {
       const cookieConfig = loadAzureConfigFromCookie();
@@ -148,10 +209,12 @@ function App() {
       console.log('🔐 Azure Token Service configured with App Registration');
     }
     
-    // For Entra ID auth, we don't require subscription key
-    const hasSpeechConfig = azureConfig?.speech?.authType === 'entraId'
-      ? azureConfig?.speech?.region
-      : (azureConfig?.speech?.region && azureConfig?.speech?.subscriptionKey);
+    // For Entra ID or managedIdentity auth, we don't require subscription key
+    const hasSpeechConfig = azureConfig?.speech?.authType === 'managedIdentity'
+      ? true  // Backend handles everything for managed identity
+      : azureConfig?.speech?.authType === 'entraId'
+        ? azureConfig?.speech?.region
+        : (azureConfig?.speech?.region && azureConfig?.speech?.subscriptionKey);
       
     if (hasSpeechConfig) {
       const sanitizedLanguages =
@@ -173,8 +236,8 @@ function App() {
       }
 
       transcriptionService.initialize({
-        region: azureConfig!.speech.region,
-        subscriptionKey: azureConfig!.speech.subscriptionKey,
+        region: azureConfig!.speech.region || '',  // May be empty for managedIdentity - backend provides it
+        subscriptionKey: azureConfig!.speech.subscriptionKey || '',  // Empty for managedIdentity
         apiVersion: azureConfig!.speech.apiVersion || '2025-10-15',
         selectedLanguages: sanitizedLanguages ?? azureConfig!.speech.selectedLanguages ?? DEFAULT_CALL_CENTER_LANGUAGES,
         diarizationEnabled: azureConfig!.speech.diarizationEnabled ?? false,

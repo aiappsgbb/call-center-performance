@@ -77,7 +77,12 @@ export function CallDetailDialog({
       return;
     }
 
-    if (!config?.speech.region || !config?.speech.subscriptionKey) {
+    // Check speech config - managedIdentity doesn't need anything (backend handles all)
+    const hasSpeechConfig = config?.speech?.authType === 'managedIdentity'
+      ? true  // Backend handles everything
+      : (config?.speech?.region && config?.speech?.subscriptionKey);
+    
+    if (!hasSpeechConfig) {
       toast.error('Azure Speech service not configured. Please configure in Settings.');
       return;
     }
@@ -101,10 +106,12 @@ export function CallDetailDialog({
       console.log(`🌍 Will use these languages:`, selectedLanguages);
 
       const sttCaller = new STTCaller({
-        region: config.speech.region,
-        subscriptionKey: config.speech.subscriptionKey,
-        apiVersion: config.speech.apiVersion,
-        selectedLanguages: selectedLanguages, // ✅ PASS IT TO STTCaller!
+        region: config.speech?.region || '',  // May be empty for managedIdentity - token endpoint provides region
+        subscriptionKey: config.speech?.subscriptionKey || '',  // Empty for managedIdentity
+        apiVersion: config.speech?.apiVersion,
+        selectedLanguages: selectedLanguages,
+        authType: config.speech?.authType || 'apiKey',  // CRITICAL: Pass auth type for managedIdentity support
+        tenantId: config.speech?.tenantId,
       });
 
       // Convert audio file to File object if needed
@@ -228,20 +235,27 @@ export function CallDetailDialog({
       return;
     }
 
-    if (!config?.openAI.endpoint || !config?.openAI.apiKey) {
+    // Check OpenAI config - managedIdentity doesn't need apiKey (backend handles auth)
+    const hasOpenAIConfig = config?.openAI?.authType === 'managedIdentity'
+      ? true
+      : (config?.openAI?.endpoint && config?.openAI?.apiKey);
+    
+    if (!hasOpenAIConfig) {
       toast.error('Azure OpenAI not configured. Please configure in Settings.');
       return;
     }
 
     setEvaluating(true);
     try {
-      // Update service configuration
-      azureOpenAIService.updateConfig({
-        endpoint: config.openAI.endpoint,
-        apiKey: config.openAI.apiKey,
-        deploymentName: config.openAI.deploymentName,
-        apiVersion: config.openAI.apiVersion,
-      });
+      // Update service configuration (for non-managedIdentity auth)
+      if (config?.openAI?.authType !== 'managedIdentity') {
+        azureOpenAIService.updateConfig({
+          endpoint: config!.openAI.endpoint,
+          apiKey: config!.openAI.apiKey,
+          deploymentName: config!.openAI.deploymentName,
+          apiVersion: config!.openAI.apiVersion,
+        });
+      }
 
       const evaluation = await azureOpenAIService.evaluateCall(
         call.transcript,
@@ -312,12 +326,22 @@ export function CallDetailDialog({
       return;
     }
 
-    if (!config?.speech?.region || !config?.speech?.subscriptionKey) {
+    // Check speech config - managedIdentity doesn't need anything (backend handles all)
+    const hasSpeechConfig = config?.speech?.authType === 'managedIdentity'
+      ? true  // Backend handles everything including region
+      : (config?.speech?.region && config?.speech?.subscriptionKey);
+    
+    if (!hasSpeechConfig) {
       toast.error('Azure Speech credentials not configured. Please configure in Settings.');
       return;
     }
 
-    if (!config?.openAI?.endpoint || !config?.openAI?.apiKey) {
+    // Check OpenAI config - managedIdentity doesn't need apiKey (backend handles auth)
+    const hasOpenAIConfig = config?.openAI?.authType === 'managedIdentity'
+      ? true
+      : (config?.openAI?.endpoint && config?.openAI?.apiKey);
+    
+    if (!hasOpenAIConfig) {
       toast.error('Azure OpenAI not configured. Needed for gender detection from names.');
       return;
     }
