@@ -1,0 +1,42 @@
+{
+  "name": "Call Analytics",
+  "description": "The Call Center QA Platform is a comprehensive React-based dashboard that streamlines the quality assurance process for call centers. It leverages Azure Speech Services for accurate transcription and Azure OpenAI for intelligent evaluation against customizable quality criteria.",
+  "maturity": "Silver",
+  "region": "EMEA",
+  "industry": "Cross",
+  "owner": "amantara",
+  "pattern": [
+    "Data & Analytics",
+    "AI/ML"
+  ],
+  "services": [
+    "Azure OpenAI",
+    "Azure Container Apps",
+    "Azure Key Vault",
+    "Azure Storage",
+    "Azure Cognitive Services",
+    "Azure Application Insights"
+  ],
+  "tags": [],
+  "version": "1.0.0",
+  "createdDate": "2026-01-27",
+  "lastUpdated": "2026-01-27",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/aiappsgbb/call-center-performance",
+    "branch": "main"
+  },
+  "documentation": {
+    "readme": "https://github.com/aiappsgbb/call-center-performance/blob/main/README.md",
+    "architecture": "",
+    "demo": ""
+  },
+  "contacts": {
+    "technical": [
+      "amantara"
+    ],
+    "business": [
+      "clsieble"
+    ]
+  }
+}
