@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   detect-scope:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       target-scope: ${{ steps.detect.outputs.target-scope }}
       resource-group-name: ${{ steps.detect.outputs.resource-group-name }}
@@ -64,7 +64,7 @@ jobs:
 
   build:
     needs: detect-scope
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     environment: "GBB demo"
     # azd built-in variables.
     # These variables are always set by `azd pipeline config`
