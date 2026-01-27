@@ -2,7 +2,7 @@
 
 name: call-center-performance
 metadata:
-  template: call-center-performance@1.0.0
+  template: call-analytics@1.0.0
 
 # Azure services configuration
 services:
