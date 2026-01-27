@@ -300,22 +300,28 @@ export async function generateSyntheticAudioBatch(
 ): Promise<Map<string, SyntheticAudioResult | null>> {
   const results = new Map<string, SyntheticAudioResult | null>();
 
+  console.log(`🔊 Starting batch generation for ${calls.length} calls`);
+
   // Filter to only calls with transcripts
   const callsWithTranscripts = calls.filter(c => 
     c.transcriptPhrases && c.transcriptPhrases.length > 0
   );
 
+  console.log(`🔊 ${callsWithTranscripts.length} calls have transcripts, ${calls.length - callsWithTranscripts.length} will be skipped`);
+
   for (let i = 0; i < callsWithTranscripts.length; i++) {
     const call = callsWithTranscripts[i];
     
+    console.log(`🔊 Processing call ${i + 1}/${callsWithTranscripts.length}: ${call.id}`);
     onProgress?.(i + 1, callsWithTranscripts.length, call.id, 'processing');
 
     try {
       const result = await generateSyntheticAudio(call, schema, llmCaller, azureConfig);
+      console.log(`🔊 ✅ Generated audio for call ${call.id}, blob size: ${result.audioBlob.size}`);
       results.set(call.id, result);
       onProgress?.(i + 1, callsWithTranscripts.length, call.id, 'completed');
     } catch (error) {
-      console.error(`Failed to generate synthetic audio for call ${call.id}:`, error);
+      console.error(`🔊 ❌ Failed to generate synthetic audio for call ${call.id}:`, error);
       results.set(call.id, null);
       onProgress?.(i + 1, callsWithTranscripts.length, call.id, 'failed');
     }
@@ -329,10 +335,13 @@ export async function generateSyntheticAudioBatch(
   // Mark calls without transcripts as skipped
   for (const call of calls) {
     if (!results.has(call.id)) {
+      console.log(`🔊 ⏭️ Skipping call ${call.id} (no transcript)`);
       results.set(call.id, null);
       onProgress?.(calls.indexOf(call) + 1, calls.length, call.id, 'skipped');
     }
   }
+
+  console.log(`🔊 Batch complete. Total results: ${results.size}, successful: ${Array.from(results.values()).filter(r => r !== null).length}`);
 
   return results;
 }

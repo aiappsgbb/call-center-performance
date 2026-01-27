@@ -5,6 +5,7 @@ import { loadRulesForSchema } from '@/services/rules-generator';
 import type { AzureOpenAIConfig } from '@/configManager';
 import { LLMCaller, ChatMessage, LLMCallOptions } from '../llmCaller';
 import { preparePrompt } from '@/lib/prompt-loader';
+import { BrowserConfigManager } from './browser-config-manager';
 
 // Global rules cache - can be updated by UI
 let CUSTOM_EVALUATION_CRITERIA: EvaluationCriterion[] | null = null;
@@ -17,29 +18,28 @@ export function getActiveEvaluationCriteria(): EvaluationCriterion[] {
   return CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
 }
 
+// Cache for evaluation criteria to prevent repeated localStorage reads on every render
+const evaluationCriteriaCache = new Map<string, { criteria: EvaluationCriterion[], timestamp: number }>();
+const CACHE_TTL_MS = 5000; // 5 second cache
+
 /**
  * Get evaluation criteria for a specific schema
  * This loads rules directly from localStorage for the given schema ID
  * Falls back to global custom criteria, then default criteria
  */
 export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCriterion[] {
-  console.log(`🔍 getEvaluationCriteriaForSchema called with schemaId: "${schemaId}"`);
+  // Check cache first
+  const cached = evaluationCriteriaCache.get(schemaId);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.criteria;
+  }
   
-  // Debug: List all evaluation-criteria keys in localStorage
-  const allKeys = Object.keys(localStorage).filter(k => k.startsWith('evaluation-criteria'));
-  console.log(`🔍 All evaluation-criteria keys in localStorage:`, allKeys);
-  
-  // Try to load schema-specific rules first
-  const expectedKey = `evaluation-criteria-${schemaId}`;
-  console.log(`🔍 Looking for key: "${expectedKey}"`);
-  
+  // Load from localStorage
   const schemaRules = loadRulesForSchema(schemaId);
-  console.log(`🔍 loadRulesForSchema returned:`, schemaRules ? `${schemaRules.length} rules` : 'null');
   
+  let criteria: EvaluationCriterion[];
   if (schemaRules && schemaRules.length > 0) {
-    console.log(`📋 Using ${schemaRules.length} schema-specific rules for: ${schemaId}`);
-    console.log(`📋 Rule names: ${schemaRules.map(r => r.name).join(', ')}`);
-    return schemaRules.map(rule => ({
+    criteria = schemaRules.map(rule => ({
       id: rule.id,
       type: rule.type,
       name: rule.name,
@@ -48,37 +48,25 @@ export function getEvaluationCriteriaForSchema(schemaId: string): EvaluationCrit
       scoringStandard: rule.scoringStandard,
       examples: rule.examples
     }));
+  } else {
+    // Fall back to global custom criteria or defaults
+    criteria = CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
   }
   
-  // Fall back to global custom criteria or defaults
-  const fallbackRules = CUSTOM_EVALUATION_CRITERIA || EVALUATION_CRITERIA;
-  console.log(`⚠️ No rules for schema ${schemaId}, using ${CUSTOM_EVALUATION_CRITERIA ? 'global custom' : 'DEFAULT HARDCODED'} criteria (${fallbackRules.length} rules)`);
-  console.log(`⚠️ Fallback rule names: ${fallbackRules.map(r => r.name).join(', ')}`);
-  return fallbackRules;
+  // Update cache
+  evaluationCriteriaCache.set(schemaId, { criteria, timestamp: Date.now() });
+  
+  return criteria;
 }
 
 /**
- * Simple ConfigManager adapter for browser environment
- * Bridges AzureOpenAIConfig with ConfigManager interface expected by LLMCaller
+ * Clear the evaluation criteria cache (call when rules are updated)
  */
-class BrowserConfigManager {
-  constructor(private config: AzureOpenAIConfig) {
-    console.log('📦 BrowserConfigManager created with reasoningEffort:', config.reasoningEffort);
-  }
-
-  async getConfig(): Promise<AzureOpenAIConfig | null> {
-    console.log('📖 BrowserConfigManager.getConfig() returning reasoningEffort:', this.config.reasoningEffort);
-    return this.config;
-  }
-
-  async getEntraIdToken(_tenantId?: string): Promise<string | null> {
-    // In browser environment, Entra ID auth would require different implementation
-    // For now, we only support API key authentication
-    throw new Error('Entra ID authentication not supported in browser environment');
-  }
-
-  getMaxRetries(): number {
-    return 3; // Default retry count
+export function clearEvaluationCriteriaCache(schemaId?: string): void {
+  if (schemaId) {
+    evaluationCriteriaCache.delete(schemaId);
+  } else {
+    evaluationCriteriaCache.clear();
   }
 }
 
@@ -102,6 +90,11 @@ export class AzureOpenAIService {
   }
 
   private isConfigValid(): boolean {
+    // For Entra ID auth, we don't need an API key
+    if (this.config.authType === 'entraId') {
+      return !!(this.config.endpoint && this.config.deploymentName);
+    }
+    // For API key auth, we need all three
     return !!(this.config.endpoint && this.config.apiKey && this.config.deploymentName);
   }
 
@@ -178,7 +171,9 @@ export class AzureOpenAIService {
     const hasCustomInsights = schema.insightCategories && schema.insightCategories.length > 0;
     
     if (hasCustomInsights) {
-      console.log(`📝 Using schema-driven insights (${schema.insightCategories!.length} categories)`);
+      const enabledCategories = schema.insightCategories!.filter(c => c.enabled);
+      console.log(`📝 Using schema-driven insights (${enabledCategories.length} enabled categories out of ${schema.insightCategories!.length} total)`);
+      console.log(`📝 Enabled category names: ${enabledCategories.map(c => c.name).join(', ')}`);
       return this.buildSchemaBasedEvaluationPrompt(
         transcript,
         metadata,
@@ -478,15 +473,15 @@ ${topicsText}
           throw new Error(`Invalid result structure: ${JSON.stringify(result)}`);
         }
         
-        // Find the matching criterion by ID or name
+        // Find the matching criterion by ID, name, or numeric index (LLM returns 1-based index)
         const criterion = activeCriteria.find(c => 
           c.id === result.criterionId || 
           c.name === result.criterionName ||
           c.id === parseInt(result.criterionId)
-        );
+        ) || activeCriteria[parseInt(result.criterionId) - 1]; // Fallback to array index (1-based to 0-based)
         
         if (!criterion) {
-          console.warn(`⚠ No criterion found for ID: ${result.criterionId}`);
+          console.warn(`⚠ No criterion found for ID: ${result.criterionId}, skipping enforcement`);
           return result;
         }
         
@@ -526,8 +521,10 @@ ${topicsText}
         // Check if schema has custom insight categories - use schema-driven insights
         if (hasCustomInsights && parsed.insights.schemaInsights) {
           console.log('📊 Parsing schema-driven insights');
+          console.log(`📊 Schema has ${schema.insightCategories!.filter(c => c.enabled).length} enabled insight categories:`, schema.insightCategories!.filter(c => c.enabled).map(c => c.name).join(', '));
           schemaInsights = parsed.insights.schemaInsights;
-          console.log(`✓ Schema insights categories: ${Object.keys(schemaInsights).join(', ')}`);
+          console.log(`✓ Schema insights received from LLM - categories: ${Object.keys(schemaInsights).join(', ')}`);
+          console.log(`✓ Full schemaInsights data:`, JSON.stringify(schemaInsights, null, 2));
         } 
         // Only parse legacy insights if schema does NOT have custom insight categories
         else if (!hasCustomInsights) {
@@ -695,7 +692,8 @@ ${topicsText}
   private async buildSentimentPrompt(
     phrases: TranscriptPhrase[],
     locale: string,
-    allowedSentiments: SentimentLabel[]
+    allowedSentiments: SentimentLabel[],
+    businessContext: string = 'call center'
   ): Promise<string> {
     if (phrases.length === 0) {
       return 'No conversation available.';
@@ -723,6 +721,7 @@ ${topicsText}
 
     return await preparePrompt('sentiment-timeline-analysis', {
       locale,
+      businessContext,
       allowedSentiments: allowedSentiments.join(', '),
       timeline: timeline + omittedSuffix
     });
@@ -732,8 +731,9 @@ ${topicsText}
     callId: string,
     phrases: TranscriptPhrase[],
     locale = 'en-US',
-    allowedSentiments: SentimentLabel[] = ['positive', 'neutral', 'negative']
-  ): Promise<{ segments: CallSentimentSegment[]; summary: string }> {
+    allowedSentiments: SentimentLabel[] = ['positive', 'neutral', 'negative'],
+    businessContext: string = 'call center'
+  ): Promise<{ segments: CallSentimentSegment[]; summary: string; customerEmotionalArc?: string; agentPerformance?: string; criticalMoments?: string[] }> {
     if (phrases.length === 0) {
       return {
         segments: [],
@@ -747,15 +747,23 @@ ${topicsText}
 
     console.log(`🔍 Starting sentiment analysis for call ${callId}...`);
 
+    const userPrompt = await this.buildSentimentPrompt(phrases, locale, allowedSentiments, businessContext);
+    
+    // Debug: Log the prompt being sent
+    console.log('🔍 Sentiment analysis prompt length:', userPrompt.length);
+    console.log('🔍 Prompt includes "intensity"?', userPrompt.includes('intensity'));
+    console.log('🔍 Prompt includes "emotionalTriggers"?', userPrompt.includes('emotionalTriggers'));
+    console.log('🔍 Business context:', businessContext);
+    
     const messages: ChatMessage[] = [
       {
         role: 'system',
         content:
-          'You are an experienced contact-center sentiment analyst. Return valid JSON only using the specified schema and sentiment labels.',
+          'You are an expert call center quality analyst specializing in emotional intelligence. Return valid JSON only using the specified schema and sentiment labels.',
       },
       {
         role: 'user',
-        content: await this.buildSentimentPrompt(phrases, locale, allowedSentiments),
+        content: userPrompt,
       },
     ];
 
@@ -779,6 +787,9 @@ ${topicsText}
     try {
       const response = await this.llmCaller.callWithJsonValidation<{
         summary?: string;
+        customerEmotionalArc?: string;
+        agentPerformance?: string;
+        criticalMoments?: string[];
         segments?: Array<{
           startMilliseconds?: number;
           endMilliseconds?: number;
@@ -786,9 +797,11 @@ ${topicsText}
           end?: number;
           speaker?: number | null;
           sentiment?: string;
+          intensity?: number;
           confidence?: number;
           summary?: string;
           rationale?: string;
+          emotionalTriggers?: string[];
         }>;
       }>(messages, {
         useJsonMode: false,
@@ -797,6 +810,15 @@ ${topicsText}
       });
 
       const { parsed } = response;
+      
+      // DEBUG: Log what LLM actually returned
+      console.log('🔍 LLM Response - parsed.segments:', parsed.segments?.length || 0, 'segments');
+      if (parsed.segments && parsed.segments.length > 0) {
+        console.log('🔍 First segment from LLM:', JSON.stringify(parsed.segments[0]));
+      }
+      console.log('🔍 Has customerEmotionalArc?', !!parsed.customerEmotionalArc);
+      console.log('🔍 Has agentPerformance?', !!parsed.agentPerformance);
+      
       const segments: CallSentimentSegment[] = [];
 
       if (Array.isArray(parsed.segments)) {
@@ -830,6 +852,11 @@ ${topicsText}
               ? Math.min(Math.max(raw.confidence, 0), 1)
               : undefined;
 
+          const intensity =
+            typeof raw.intensity === 'number'
+              ? Math.min(Math.max(Math.round(raw.intensity), 1), 10)
+              : undefined;
+
           const sentiment = normalizeSentiment(raw.sentiment || 'neutral');
 
           const segment: CallSentimentSegment = {
@@ -840,9 +867,11 @@ ${topicsText}
                 ? raw.speaker
                 : undefined,
             sentiment,
+            intensity,
             confidence,
             summary: raw.summary,
             rationale: raw.rationale,
+            emotionalTriggers: Array.isArray(raw.emotionalTriggers) ? raw.emotionalTriggers : undefined,
           };
 
           segments.push(segment);
@@ -857,10 +886,19 @@ ${topicsText}
           : 'Sentiment analysis completed.';
 
       console.log(`✓ Sentiment analysis complete: ${segments.length} segments identified`);
+      if (parsed.customerEmotionalArc) {
+        console.log(`✓ Customer emotional arc: ${parsed.customerEmotionalArc}`);
+      }
+      if (parsed.agentPerformance) {
+        console.log(`✓ Agent performance: ${parsed.agentPerformance}`);
+      }
 
       return {
         segments,
         summary,
+        customerEmotionalArc: parsed.customerEmotionalArc,
+        agentPerformance: parsed.agentPerformance,
+        criticalMoments: parsed.criticalMoments,
       };
     } catch (error) {
       console.error('Error analyzing sentiment timeline:', error);
