@@ -33,6 +33,9 @@ param speechRegion string
 @description('Azure Speech Resource ID')
 param speechResourceId string
 
+@description('Azure Speech Endpoint (custom subdomain)')
+param speechEndpoint string
+
 @description('Application Insights Connection String')
 param applicationInsightsConnectionString string
 
@@ -97,6 +100,10 @@ resource containerApp 'Microsoft.App/containerApps@2025-01-01' = {
             {
               name: 'AZURE_SPEECH_RESOURCE_ID'
               value: speechResourceId
+            }
+            {
+              name: 'AZURE_SPEECH_ENDPOINT'
+              value: speechEndpoint
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

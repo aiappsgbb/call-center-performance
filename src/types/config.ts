@@ -23,6 +23,8 @@ export interface AzureServicesConfig {
     tenantId?: string;
   };
   speech: {
+    /** Custom subdomain endpoint for token auth (e.g., https://<name>.cognitiveservices.azure.com) */
+    endpoint?: string;
     region: string;
     subscriptionKey: string;
     apiVersion: string;

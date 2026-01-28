@@ -18,6 +18,7 @@ const AZURE_OPENAI_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT;
 const AZURE_OPENAI_DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-5-mini';
 const AZURE_SPEECH_REGION = process.env.AZURE_SPEECH_REGION || 'swedencentral';
 const AZURE_SPEECH_RESOURCE_ID = process.env.AZURE_SPEECH_RESOURCE_ID;
+const AZURE_SPEECH_ENDPOINT = process.env.AZURE_SPEECH_ENDPOINT;
 
 // Azure credential using managed identity
 const credential = new DefaultAzureCredential();
@@ -54,6 +55,7 @@ app.get('/api/config', (req, res) => {
     },
     speech: {
       region: AZURE_SPEECH_REGION,
+      endpoint: AZURE_SPEECH_ENDPOINT,
       authType: 'managedIdentity',
     }
   });
@@ -88,12 +90,11 @@ async function getSpeechToken() {
   console.log('🔐 Acquiring Azure Speech token via managed identity...');
   const tokenResponse = await credential.getToken('https://cognitiveservices.azure.com/.default');
   const rawToken = tokenResponse.token;
-  if (AZURE_SPEECH_RESOURCE_ID) {
-    speechToken = `aad#${AZURE_SPEECH_RESOURCE_ID}#${rawToken}`;
-  } else {
+  if (!AZURE_SPEECH_RESOURCE_ID) {
     console.warn('⚠️ AZURE_SPEECH_RESOURCE_ID not set; using raw Speech token');
-    speechToken = rawToken;
   }
+  // For Speech REST APIs, use the raw AAD token in the Authorization header
+  speechToken = rawToken;
   speechTokenExpiry = tokenResponse.expiresOnTimestamp;
   console.log('🔐 Azure Speech token acquired');
   return speechToken;
@@ -192,6 +193,7 @@ app.get('/api/speech/token', async (req, res) => {
     res.json({
       token: token,
       region: AZURE_SPEECH_REGION,
+      endpoint: AZURE_SPEECH_ENDPOINT,
       expiresIn: 600, // 10 minutes
     });
   } catch (error) {

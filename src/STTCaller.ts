@@ -134,6 +134,11 @@ export class STTCaller {
    * Get the base URL for Azure Speech API
    */
   private getBaseUrl(): string {
+    const endpoint = this.config.endpoint?.trim();
+    if (endpoint) {
+      const normalized = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+      return `${normalized}/speechtotext`;
+    }
     return `https://${this.config.region}.api.cognitive.microsoft.com/speechtotext`;
   }
 
@@ -165,6 +170,10 @@ export class STTCaller {
       if (data.region && !this.config.region) {
         this.config.region = data.region;
         console.log(`🌍 STT region set from backend: ${data.region}`);
+      }
+      if (data.endpoint && !this.config.endpoint) {
+        this.config.endpoint = data.endpoint;
+        console.log(`🌍 STT endpoint set from backend: ${data.endpoint}`);
       }
       return data.token;
     }

@@ -21,8 +21,10 @@ export async function inferSimpleRelationships(
       throw new Error('Azure OpenAI configuration not found');
     }
     
-    // Check for valid auth - either API key or Entra ID
-    const hasValidAuth = config.openAI.authType === 'entraId' || config.openAI.apiKey;
+    // Check for valid auth - API key, Entra ID, or managed identity
+    const hasValidAuth = config.openAI.authType === 'entraId' ||
+      config.openAI.authType === 'managedIdentity' ||
+      config.openAI.apiKey;
     if (!hasValidAuth) {
       throw new Error('Azure OpenAI authentication not configured');
     }
@@ -142,8 +144,10 @@ export async function inferComplexRelationships(
       throw new Error('Azure OpenAI configuration not found');
     }
     
-    // Check for valid auth - either API key or Entra ID
-    const hasValidAuth = config.openAI.authType === 'entraId' || config.openAI.apiKey;
+    // Check for valid auth - API key, Entra ID, or managed identity
+    const hasValidAuth = config.openAI.authType === 'entraId' ||
+      config.openAI.authType === 'managedIdentity' ||
+      config.openAI.apiKey;
     if (!hasValidAuth) {
       throw new Error('Azure OpenAI authentication not configured');
     }

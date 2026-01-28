@@ -8,6 +8,8 @@ import { azureTokenService } from './services/azure-token';
 export type AzureAuthType = 'apiKey' | 'entraId' | 'managedIdentity';
 
 export interface AzureTTSConfig {
+  /** Custom subdomain endpoint for token auth (e.g., https://<name>.cognitiveservices.azure.com) */
+  endpoint?: string;
   region: string;
   subscriptionKey: string;
   defaultMaleVoice1?: string;
@@ -141,6 +143,10 @@ export class TTSCaller {
         this.config.region = data.region;
         console.log(`🌍 TTS region set from backend: ${data.region}`);
       }
+      if (data.endpoint && !this.config.endpoint) {
+        this.config.endpoint = data.endpoint;
+        console.log(`🌍 TTS endpoint set from backend: ${data.endpoint}`);
+      }
       return data.token;
     }
 
@@ -170,6 +176,11 @@ export class TTSCaller {
    * Get the TTS endpoint URL
    */
   private getTTSEndpoint(): string {
+    const endpoint = this.config.endpoint?.trim();
+    if (endpoint) {
+      const normalized = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+      return `${normalized}/cognitiveservices/v1`;
+    }
     return `https://${this.config.region}.tts.speech.microsoft.com/cognitiveservices/v1`;
   }
 

@@ -42,6 +42,7 @@ export function ConfigDialog() {
       tenantId: '',
     },
       speech: {
+        endpoint: '',
       region: '',
       subscriptionKey: '',
       apiVersion: '2025-10-15',
@@ -83,6 +84,7 @@ export function ConfigDialog() {
         tenantId: '',
       },
       speech: {
+        endpoint: '',
         region: '',
         subscriptionKey: '',
         apiVersion: '2025-10-15',
@@ -116,7 +118,7 @@ export function ConfigDialog() {
   // State for backend config (fetched from /api/config)
   const [backendConfig, setBackendConfig] = useState<{
     openAI?: { endpoint?: string; deploymentName?: string };
-    speech?: { region?: string };
+    speech?: { region?: string; endpoint?: string };
   } | null>(null);
   
   // Fetch backend config when managed identity is enabled
@@ -251,6 +253,9 @@ export function ConfigDialog() {
         region: isManagedIdentity && backendConfig?.speech?.region
           ? backendConfig.speech.region
           : localConfig.speech.region,
+        endpoint: isManagedIdentity && backendConfig?.speech?.endpoint
+          ? backendConfig.speech.endpoint
+          : localConfig.speech.endpoint,
         selectedLanguages: sanitizedLanguages,
       },
       tts: {
@@ -291,6 +296,7 @@ export function ConfigDialog() {
       
     if (hasValidAuth) {
       transcriptionService.initialize({
+        endpoint: configToPersist.speech.endpoint,
         region: configToPersist.speech.region,
         subscriptionKey: configToPersist.speech.subscriptionKey,
         apiVersion: configToPersist.speech.apiVersion,

@@ -6627,6 +6627,7 @@ export const SCHEMA_TEMPLATES: Record<string, SchemaTemplate> = {
   'real-estate': REAL_ESTATE_TEMPLATE,
   'automotive': AUTOMOTIVE_TEMPLATE,
   'government': GOVERNMENT_TEMPLATE,
+  vodafone: VODAFONE_TEMPLATE,
 };
 
 /**

@@ -1,6 +1,8 @@
 export type AzureAuthType = 'apiKey' | 'entraId' | 'managedIdentity';
 
 export interface AzureSpeechConfig {
+  /** Custom subdomain endpoint for token auth (e.g., https://<name>.cognitiveservices.azure.com) */
+  endpoint?: string;
   region: string;
   subscriptionKey: string;
   apiVersion?: string; // Default: '2025-10-15' (latest GA)

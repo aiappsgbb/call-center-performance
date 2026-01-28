@@ -166,6 +166,7 @@ export function getOrInitializeTTSCaller(azureConfig: AzureServicesConfig): TTSC
     // For managedIdentity, region will be fetched from backend token endpoint
     
     ttsCaller = initializeTTSCaller({
+      endpoint: azureConfig.speech?.endpoint,
       region: azureConfig.speech?.region || '',  // Empty for managedIdentity - will be set from backend
       subscriptionKey: azureConfig.speech?.subscriptionKey || '',  // Empty for managedIdentity
       authType: azureConfig.speech?.authType || 'apiKey',

@@ -147,6 +147,7 @@ function App() {
                 authType: 'managedIdentity',
               },
               speech: {
+                endpoint: backendConfig.speech?.endpoint || '',
                 region: backendConfig.speech?.region || '',
                 subscriptionKey: '',  // Not needed for managedIdentity
                 apiVersion: '2025-10-15',
@@ -247,6 +248,7 @@ function App() {
       }
 
       transcriptionService.initialize({
+        endpoint: azureConfig!.speech.endpoint,
         region: azureConfig!.speech.region || '',  // May be empty for managedIdentity - backend provides it
         subscriptionKey: azureConfig!.speech.subscriptionKey || '',  // Empty for managedIdentity
         apiVersion: azureConfig!.speech.apiVersion || '2025-10-15',

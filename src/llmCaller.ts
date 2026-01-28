@@ -425,7 +425,14 @@ export class LLMCaller {
       
       console.log('[EXTRACT] About to parse JSON...');
       // Attempt to parse
-      const parsed = JSON.parse(jsonText);
+      let parsed: T;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch (initialError: any) {
+        console.warn('[EXTRACT] Initial JSON parse failed, attempting repair:', initialError.message);
+        const repaired = this.repairJsonForParsing(jsonText);
+        parsed = JSON.parse(repaired);
+      }
       console.log('[EXTRACT] ✅ Successfully parsed JSON. Type:', Array.isArray(parsed) ? 'array' : typeof parsed);
       if (Array.isArray(parsed)) {
         console.log('[EXTRACT] Array length:', parsed.length);
@@ -442,5 +449,79 @@ export class LLMCaller {
       enhancedError.responseExcerpt = excerpt;
       throw enhancedError;
     }
+  }
+
+  /**
+   * Repair common JSON issues from LLM responses:
+   * - Removes stray backslashes outside strings
+   * - Escapes newlines/tabs inside strings
+   */
+  private repairJsonForParsing(input: string): string {
+    let result = '';
+    let inString = false;
+    let escaping = false;
+
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+
+      if (!inString) {
+        if (ch === '"') {
+          inString = true;
+          result += ch;
+          continue;
+        }
+
+        if (ch === '\\') {
+          const next = input[i + 1];
+          if (next === '"') {
+            // Drop stray escape outside strings; let the quote be processed normally
+            continue;
+          }
+          // Drop any other stray backslash outside strings
+          continue;
+        }
+
+        result += ch;
+        continue;
+      }
+
+      // Inside string
+      if (escaping) {
+        result += ch;
+        escaping = false;
+        continue;
+      }
+
+      if (ch === '\\') {
+        result += ch;
+        escaping = true;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = false;
+        result += ch;
+        continue;
+      }
+
+      if (ch === '\n') {
+        result += '\\n';
+        continue;
+      }
+
+      if (ch === '\r') {
+        result += '\\r';
+        continue;
+      }
+
+      if (ch === '\t') {
+        result += '\\t';
+        continue;
+      }
+
+      result += ch;
+    }
+
+    return result;
   }
 }
