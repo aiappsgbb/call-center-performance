@@ -228,6 +228,37 @@ export class TTSCaller {
    */
   async synthesize(text: string, voiceName?: string): Promise<SynthesisResult> {
     const voice = voiceName || this.config.defaultNeutralVoice || DEFAULT_VOICES.neutral;
+    
+    // For managed identity, use backend proxy
+    if (this.config.authType === 'managedIdentity') {
+      const response = await fetch('/api/speech/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text,
+          voice,
+          outputFormat: this.config.outputFormat || 'audio-24khz-160kbitrate-mono-mp3',
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`TTS synthesis failed: ${response.status} - ${errorText}`);
+      }
+
+      const audioBlob = await response.blob();
+      const wordCount = text.split(/\s+/).length;
+      const estimatedDurationMs = (wordCount / 150) * 60 * 1000;
+
+      return {
+        audioBlob,
+        durationMs: estimatedDurationMs,
+      };
+    }
+
+    // For API key or Entra ID, use direct endpoint
     const ssml = this.buildSSML(text, voice);
     const authHeaders = await this.getAuthHeaders();
 
@@ -264,9 +295,31 @@ export class TTSCaller {
    */
   async generateSilence(durationMs: number): Promise<Blob> {
     const voice = this.config.defaultNeutralVoice || DEFAULT_VOICES.neutral;
-    const ssml = this.buildSilenceSSML(durationMs, voice);
-
+    
     try {
+      // For managed identity, use backend proxy with simple text (break tag)
+      if (this.config.authType === 'managedIdentity') {
+        const response = await fetch('/api/speech/tts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: `<break time='${durationMs}ms'/>`,
+            voice,
+            outputFormat: this.config.outputFormat || 'audio-24khz-160kbitrate-mono-mp3',
+          }),
+        });
+
+        if (!response.ok) {
+          return new Blob([], { type: 'audio/mpeg' });
+        }
+
+        return await response.blob();
+      }
+
+      // For API key or Entra ID, use direct endpoint
+      const ssml = this.buildSilenceSSML(durationMs, voice);
       const authHeaders = await this.getAuthHeaders();
       const response = await fetch(this.getTTSEndpoint(), {
         method: 'POST',

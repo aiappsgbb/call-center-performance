@@ -246,9 +246,13 @@ app.post('/api/speech/stt', async (req, res) => {
 app.post('/api/speech/tts', async (req, res) => {
   try {
     const token = await getSpeechToken();
-    const url = `https://${AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`;
+    
+    // Use custom subdomain endpoint if available, otherwise regional endpoint
+    const url = AZURE_SPEECH_ENDPOINT 
+      ? `${AZURE_SPEECH_ENDPOINT.replace(/\/$/, '')}/tts/cognitiveservices/v1`
+      : `https://${AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`;
 
-    console.log(`📤 Proxying TTS request`);
+    console.log(`📤 Proxying TTS request to: ${url}`);
 
     const { text, voice, outputFormat } = req.body;
     
