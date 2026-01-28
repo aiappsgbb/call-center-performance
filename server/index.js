@@ -92,9 +92,11 @@ async function getSpeechToken() {
   const rawToken = tokenResponse.token;
   if (!AZURE_SPEECH_RESOURCE_ID) {
     console.warn('⚠️ AZURE_SPEECH_RESOURCE_ID not set; using raw Speech token');
+    speechToken = rawToken;
+  } else {
+    // For Speech REST APIs with Entra auth, use the AAD token format: aad#resourceId#accessToken
+    speechToken = `aad#${AZURE_SPEECH_RESOURCE_ID}#${rawToken}`;
   }
-  // For Speech REST APIs, use the raw AAD token in the Authorization header
-  speechToken = rawToken;
   speechTokenExpiry = tokenResponse.expiresOnTimestamp;
   console.log('🔐 Azure Speech token acquired');
   return speechToken;
