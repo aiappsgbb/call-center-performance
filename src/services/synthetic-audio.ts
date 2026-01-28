@@ -158,13 +158,18 @@ export function initializeTTS(config: AzureTTSConfig): TTSCaller {
 export function getOrInitializeTTSCaller(azureConfig: AzureServicesConfig): TTSCaller {
   let ttsCaller = getTTSCaller();
   if (!ttsCaller) {
-    if (!azureConfig.speech?.subscriptionKey || !azureConfig.speech?.region) {
+    // For managedIdentity, we don't need subscriptionKey or region - backend handles everything
+    const isManagedIdentity = azureConfig.speech?.authType === 'managedIdentity';
+    if (!isManagedIdentity && (!azureConfig.speech?.subscriptionKey || !azureConfig.speech?.region)) {
       throw new Error('Azure Speech credentials not configured. Please configure Speech Services in the Configuration dialog.');
     }
+    // For managedIdentity, region will be fetched from backend token endpoint
     
     ttsCaller = initializeTTSCaller({
-      region: azureConfig.speech.region,
-      subscriptionKey: azureConfig.speech.subscriptionKey,
+      endpoint: azureConfig.speech?.endpoint,
+      region: azureConfig.speech?.region || '',  // Empty for managedIdentity - will be set from backend
+      subscriptionKey: azureConfig.speech?.subscriptionKey || '',  // Empty for managedIdentity
+      authType: azureConfig.speech?.authType || 'apiKey',
       defaultMaleVoice1: azureConfig.tts?.defaultMaleVoice1 || DEFAULT_VOICES.male1,
       defaultMaleVoice2: azureConfig.tts?.defaultMaleVoice2 || DEFAULT_VOICES.male2,
       defaultFemaleVoice1: azureConfig.tts?.defaultFemaleVoice1 || DEFAULT_VOICES.female1,

@@ -161,6 +161,8 @@ module containerApp 'modules/container-app.bicep' = {
     openAiEndpoint: aiFoundry.outputs.endpoint
     openAiDeployment: openAiModelDeploymentName
     speechRegion: location
+    speechResourceId: speech.outputs.id
+        speechEndpoint: speech.outputs.endpoint
     applicationInsightsConnectionString: appInsights.outputs.connectionString
   }
 }

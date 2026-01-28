@@ -188,8 +188,10 @@ export function AnalyticsConfigWizard({
         return;
       }
       
-      // Check for valid auth - either API key or Entra ID
-      const hasValidAuth = azureConfig.openAI.authType === 'entraId' || azureConfig.openAI.apiKey;
+      // Check for valid auth - API key, Entra ID, or managed identity
+      const hasValidAuth = azureConfig.openAI.authType === 'entraId' ||
+        azureConfig.openAI.authType === 'managedIdentity' ||
+        azureConfig.openAI.apiKey;
       if (!hasValidAuth) {
         toast.error('Azure OpenAI authentication not configured. Please configure API key or enable Entra ID.');
         setGenerating(false);

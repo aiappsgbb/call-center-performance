@@ -25,6 +25,7 @@ resource speech 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
     name: 'S0'
   }
   properties: {
+    customSubDomainName: toLower(name)
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Allow'

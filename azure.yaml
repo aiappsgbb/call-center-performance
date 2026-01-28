@@ -25,29 +25,21 @@ infra:
 hooks:
   # Pre-provision hook to validate prerequisites
   preprovision:
-    windows:
-      shell: pwsh
-      run: |
-        Write-Host "🔍 Validating prerequisites for Call Center Performance deployment..."
-        Write-Host "✅ Prerequisites validated"
+    shell: sh
+    run: echo "🔍 Validating prerequisites for Call Center Performance deployment..." && echo "✅ Prerequisites validated"
 
   # Post-provision hook to display configuration
   postprovision:
-    windows:
-      shell: pwsh
-      run: |
-        Write-Host ""
-        Write-Host "=========================================="
-        Write-Host "🎉 Deployment Complete!"
-        Write-Host "=========================================="
-        Write-Host ""
-        Write-Host "📌 Next Steps:"
-        Write-Host "1. Open the Container App URL from the Azure Portal"
-        Write-Host "2. Configure Azure OpenAI and Speech settings in the app"
-        Write-Host "3. Use the following environment outputs:"
-        Write-Host "   - AZURE_OPENAI_ENDPOINT: Azure OpenAI endpoint"
-        Write-Host "   - AZURE_SPEECH_REGION: Speech service region"
-        Write-Host ""
-        Write-Host "💡 To get your deployed app URL, run:"
-        Write-Host "   azd show"
-        Write-Host ""
+    shell: sh
+    run: |
+      echo ""
+      echo "=========================================="
+      echo "🎉 Deployment Complete!"
+      echo "=========================================="
+      echo ""
+      echo "📌 Next Steps:"
+      echo "1. Open the Container App URL from the Azure Portal"
+      echo "2. Configure Azure OpenAI and Speech settings in the app"
+      echo ""
+      echo "💡 To get your deployed app URL, run: azd show"
+      echo ""
